@@ -1,21 +1,19 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Heart, ChevronRight, ChevronLeft, Check, Lock, Eye, EyeOff, Trash2, ArrowLeft, User, TrendingUp, TrendingDown, AlertTriangle, Users, Activity, Target, Sparkles, FileJson, FileSpreadsheet, Calendar, MessageSquare, Minus, RefreshCw, AlertCircle, X, Brain, Zap, Tag, Quote } from 'lucide-react';
+import { Heart, ChevronRight, ChevronLeft, Check, Lock, Eye, EyeOff, Trash2, ArrowLeft, User, TrendingUp, TrendingDown, AlertTriangle, Users, Activity, Target, Sparkles, FileJson, FileSpreadsheet, Calendar, MessageSquare, Minus, RefreshCw, AlertCircle, X, Brain, Zap, Tag, Quote, Wand2, ChevronDown, ChevronUp } from 'lucide-react';
 
 // ====== SUPABASE CONFIG ======
 const SUPABASE_URL = 'https://lsrpjxnmasdnuepwdher.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_3F53NrwMUxshvlFaQ2yVvg_KJgBRY23';
 const TABLE = 'atm_pulse_responses';
 const EVENTS_TABLE = 'atm_pulse_question_events';
+const BRIEFINGS_TABLE = 'atm_pulse_briefings';
 const PROCESS_FN = `${SUPABASE_URL}/functions/v1/atm-pulse-process`;
+const BRIEFING_FN = `${SUPABASE_URL}/functions/v1/atm-pulse-briefing`;
 
-// ====== SURVEY VERSION ======
 const SURVEY_VERSION = 'v2.0';
-
-// ====== ADMIN PASSCODE ======
 const ADMIN_PASSCODE = 'SHANKS2026';
-// ============================
 
 const RATING_QUESTIONS = [
   { id: 'happiness', dim: 'Engagement', text: 'How happy are you in your current role?', subtext: 'Think about your day-to-day experience.' },
@@ -63,76 +61,63 @@ const sb = {
   async insert(row: any) {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}`, {
       method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
-      },
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
       body: JSON.stringify(row)
     });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Insert failed (${res.status}): ${text}`);
-    }
+    if (!res.ok) throw new Error(`Insert failed (${res.status}): ${await res.text()}`);
     return res.json();
   },
   async insertEvents(events: any[]) {
     if (!events.length) return [];
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${EVENTS_TABLE}`, {
       method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
-      },
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
       body: JSON.stringify(events)
     });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Events insert failed (${res.status}): ${text}`);
-    }
+    if (!res.ok) throw new Error(`Events insert failed (${res.status}): ${await res.text()}`);
     return res.json();
   },
   async selectAll() {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?select=*&order=submitted_at.desc`, {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
     });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Select failed (${res.status}): ${text}`);
-    }
+    if (!res.ok) throw new Error(`Select failed (${res.status}): ${await res.text()}`);
     return res.json();
+  },
+  async getLatestBriefing() {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${BRIEFINGS_TABLE}?scope=eq.all_time&select=*&order=generated_at.desc&limit=1`, {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+    });
+    if (!res.ok) throw new Error(`Briefing fetch failed (${res.status}): ${await res.text()}`);
+    const rows = await res.json();
+    return rows[0] || null;
   },
   async delete(id: string) {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?id=eq.${id}`, {
       method: 'DELETE',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
     });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Delete failed (${res.status}): ${text}`);
-    }
+    if (!res.ok) throw new Error(`Delete failed (${res.status}): ${await res.text()}`);
     return true;
   },
   triggerProcessing(responseId: string) {
-    // Fire and forget — don't block UI on AI processing
     fetch(PROCESS_FN, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ response_id: responseId })
     }).catch(e => console.warn('AI processing trigger failed:', e));
+  },
+  async generateBriefing() {
+    const res = await fetch(BRIEFING_FN, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+    });
+    if (!res.ok) throw new Error(`Briefing gen failed (${res.status}): ${await res.text()}`);
+    return res.json();
   }
 };
 
 // ==================== UTILS ====================
 const mean = (arr: number[]) => arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
-const variance = (arr: number[]) => {
-  if (arr.length < 2) return 0;
-  const m = mean(arr);
-  return mean(arr.map(v => (v - m) ** 2));
-};
+const variance = (arr: number[]) => { if (arr.length < 2) return 0; const m = mean(arr); return mean(arr.map(v => (v - m) ** 2)); };
 const stdev = (arr: number[]) => Math.sqrt(variance(arr));
 const computeNPS = (vals: number[]) => {
   const valid = vals.filter(v => v !== null && v !== undefined);
@@ -141,10 +126,8 @@ const computeNPS = (vals: number[]) => {
   const detractors = valid.filter(v => v <= 6).length;
   return Math.round(((promoters - detractors) / valid.length) * 100);
 };
-
 const wordCount = (s: string) => s ? s.trim().split(/\s+/).filter(Boolean).length : 0;
 const charCount = (s: string) => s ? s.length : 0;
-
 const detectDeviceType = (): string => {
   if (typeof window === 'undefined') return 'unknown';
   const ua = navigator.userAgent;
@@ -154,59 +137,47 @@ const detectDeviceType = (): string => {
 };
 
 const adaptRow = (r: any) => ({
-  id: r.id,
-  firstName: r.first_name,
-  nameKey: r.name_key,
-  startedAt: r.started_at,
-  submittedAt: r.submitted_at,
-  durationSec: r.duration_sec,
-  responses: r.responses || {},
-  ratingComments: r.rating_comments || {},
-  // V2 fields
-  surveyVersion: r.survey_version,
-  waveId: r.wave_id,
-  deviceType: r.device_type,
-  totalEdits: r.total_edits,
-  ratingChanges: r.rating_changes,
-  skippedOpenCount: r.skipped_open_count,
-  hesitationScore: r.hesitation_score,
-  ratingAvg: r.rating_avg,
-  ratingMin: r.rating_min,
-  ratingMax: r.rating_max,
-  ratingStdev: r.rating_stdev,
-  npsClassification: r.nps_classification,
+  id: r.id, firstName: r.first_name, nameKey: r.name_key, startedAt: r.started_at,
+  submittedAt: r.submitted_at, durationSec: r.duration_sec,
+  responses: r.responses || {}, ratingComments: r.rating_comments || {},
+  surveyVersion: r.survey_version, waveId: r.wave_id, deviceType: r.device_type,
+  totalEdits: r.total_edits, ratingChanges: r.rating_changes,
+  skippedOpenCount: r.skipped_open_count, hesitationScore: r.hesitation_score,
+  ratingAvg: r.rating_avg, ratingMin: r.rating_min, ratingMax: r.rating_max,
+  ratingStdev: r.rating_stdev, npsClassification: r.nps_classification,
   totalWordCount: r.total_word_count,
-  // AI fields
-  aiProcessedAt: r.ai_processed_at,
-  aiSummary: r.ai_summary,
-  aiThemes: r.ai_themes || [],
-  aiSentimentOverall: r.ai_sentiment_overall,
+  aiProcessedAt: r.ai_processed_at, aiSummary: r.ai_summary,
+  aiThemes: r.ai_themes || [], aiSentimentOverall: r.ai_sentiment_overall,
   aiSentimentByQuestion: r.ai_sentiment_by_question || {},
   aiAnomalyFlags: r.ai_anomaly_flags || [],
-  aiEmotionalTone: r.ai_emotional_tone,
-  aiKeySignals: r.ai_key_signals || [],
+  aiEmotionalTone: r.ai_emotional_tone, aiKeySignals: r.ai_key_signals || [],
   aiProcessingError: r.ai_processing_error
 });
 
-// ==================== TOAST ====================
+const adaptBriefing = (b: any) => b ? ({
+  id: b.id, scope: b.scope,
+  headline: b.headline, pulseRead: b.pulse_read,
+  whatsWorking: b.whats_working || [], whatsBreaking: b.whats_breaking || [],
+  quietlyConcerning: b.quietly_concerning || [],
+  peopleToTalkTo: b.people_to_talk_to || [],
+  themesCompounding: b.themes_compounding || [],
+  theQuote: b.the_quote || null,
+  generatedAt: b.generated_at,
+  submissionCountAtGeneration: b.submission_count_at_generation,
+  uniquePeopleAtGeneration: b.unique_people_at_generation,
+  generationError: b.generation_error
+}) : null;
+
+// ==================== TOAST & DIALOGS ====================
 function Toast({ kind, message, onClose }: any) {
-  useEffect(() => {
-    if (kind === 'success') {
-      const t = setTimeout(onClose, 3000);
-      return () => clearTimeout(t);
-    }
-  }, [kind, onClose]);
-  const colors = kind === 'error'
-    ? 'bg-rose-50 border-rose-300 text-rose-800'
-    : 'bg-emerald-50 border-emerald-300 text-emerald-800';
+  useEffect(() => { if (kind === 'success') { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); } }, [kind, onClose]);
+  const colors = kind === 'error' ? 'bg-rose-50 border-rose-300 text-rose-800' : 'bg-emerald-50 border-emerald-300 text-emerald-800';
   const Icon = kind === 'error' ? AlertCircle : Check;
   return (
     <div className={`fixed top-4 right-4 z-50 ${colors} border rounded-xl shadow-lg p-4 max-w-md flex items-start gap-3`}>
       <Icon className="w-5 h-5 mt-0.5 flex-shrink-0" />
       <p className="text-sm flex-1 leading-snug">{message}</p>
-      <button onClick={onClose} className="flex-shrink-0 hover:opacity-70">
-        <X className="w-4 h-4" />
-      </button>
+      <button onClick={onClose} className="flex-shrink-0 hover:opacity-70"><X className="w-4 h-4" /></button>
     </div>
   );
 }
@@ -227,17 +198,11 @@ function ConfirmDialog({ open, title, message, onConfirm, onCancel }: any) {
   );
 }
 
-// ==================== BEHAVIORAL TRACKING TYPES ====================
 interface QuestionEvent {
-  question_id: string;
-  question_type: 'rating' | 'open' | 'rating_comment';
-  time_on_question_ms: number;
-  edit_count: number;
+  question_id: string; question_type: 'rating' | 'open' | 'rating_comment';
+  time_on_question_ms: number; edit_count: number;
   value_changes: { from: any; to: any; at: number }[];
-  final_value: string;
-  word_count: number;
-  char_count: number;
-  was_skipped: boolean;
+  final_value: string; word_count: number; char_count: number; was_skipped: boolean;
 }
 
 export default function PulseSurvey() {
@@ -249,6 +214,8 @@ export default function PulseSurvey() {
   const [adminPass, setAdminPass] = useState('');
   const [adminError, setAdminError] = useState('');
   const [allResponses, setAllResponses] = useState<any[]>([]);
+  const [briefing, setBriefing] = useState<any>(null);
+  const [generatingBriefing, setGeneratingBriefing] = useState(false);
   const [loadingResponses, setLoadingResponses] = useState(false);
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [adminView, setAdminView] = useState('dashboard');
@@ -261,7 +228,6 @@ export default function PulseSurvey() {
   const [toast, setToast] = useState<any>(null);
   const [confirmDialog, setConfirmDialog] = useState<any>(null);
 
-  // Behavioral tracking refs (no rerender on update)
   const questionEventsRef = useRef<Record<string, QuestionEvent>>({});
   const stepStartTimeRef = useRef<number>(Date.now());
   const previousStepRef = useRef<number>(0);
@@ -282,9 +248,7 @@ export default function PulseSurvey() {
 
   useEffect(() => {
     if (!draftLoaded) return;
-    try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ firstName, responses, ratingComments, startedAt }));
-    } catch (e) {}
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ firstName, responses, ratingComments, startedAt })); } catch (e) {}
   }, [firstName, responses, ratingComments, startedAt, draftLoaded]);
 
   function canProceed() {
@@ -293,66 +257,49 @@ export default function PulseSurvey() {
     return true;
   }
 
-  // Track time per question — when leaving a step, record duration
   useEffect(() => {
     if (mode !== 'survey') return;
     const prevStep = previousStepRef.current;
     const elapsed = Date.now() - stepStartTimeRef.current;
-
-    // Was leaving a rating question (1-6)
     if (prevStep >= 1 && prevStep <= 6) {
       const q = RATING_QUESTIONS[prevStep - 1];
       const existing = questionEventsRef.current[q.id];
       const val = responses[q.id];
       questionEventsRef.current[q.id] = {
-        question_id: q.id,
-        question_type: 'rating',
+        question_id: q.id, question_type: 'rating',
         time_on_question_ms: (existing?.time_on_question_ms || 0) + elapsed,
         edit_count: existing?.edit_count || 0,
         value_changes: existing?.value_changes || [],
         final_value: val !== undefined && val !== null ? String(val) : '',
-        word_count: 0,
-        char_count: 0,
+        word_count: 0, char_count: 0,
         was_skipped: val === undefined || val === null
       };
-
-      // Also record the rating comment as a sub-event
       const comment = ratingComments[q.id] || '';
       if (comment) {
-        const commentKey = `${q.id}_comment`;
-        const existingComment = questionEventsRef.current[commentKey];
-        questionEventsRef.current[commentKey] = {
-          question_id: commentKey,
-          question_type: 'rating_comment',
-          time_on_question_ms: existingComment?.time_on_question_ms || 0,
-          edit_count: existingComment?.edit_count || 0,
-          value_changes: existingComment?.value_changes || [],
-          final_value: comment,
-          word_count: wordCount(comment),
-          char_count: charCount(comment),
-          was_skipped: false
+        const ck = `${q.id}_comment`;
+        const ec = questionEventsRef.current[ck];
+        questionEventsRef.current[ck] = {
+          question_id: ck, question_type: 'rating_comment',
+          time_on_question_ms: ec?.time_on_question_ms || 0,
+          edit_count: ec?.edit_count || 0,
+          value_changes: ec?.value_changes || [],
+          final_value: comment, word_count: wordCount(comment), char_count: charCount(comment), was_skipped: false
         };
       }
     }
-
-    // Was leaving an open question (8-13)
     if (prevStep >= 8 && prevStep <= 13) {
       const q = OPEN_QUESTIONS[prevStep - 8];
       const existing = questionEventsRef.current[q.id];
       const ans = responses[q.id] || '';
       questionEventsRef.current[q.id] = {
-        question_id: q.id,
-        question_type: 'open',
+        question_id: q.id, question_type: 'open',
         time_on_question_ms: (existing?.time_on_question_ms || 0) + elapsed,
         edit_count: existing?.edit_count || 0,
         value_changes: existing?.value_changes || [],
-        final_value: ans,
-        word_count: wordCount(ans),
-        char_count: charCount(ans),
+        final_value: ans, word_count: wordCount(ans), char_count: charCount(ans),
         was_skipped: !ans.trim()
       };
     }
-
     stepStartTimeRef.current = Date.now();
     previousStepRef.current = step;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -364,24 +311,11 @@ export default function PulseSurvey() {
       const target = e.target as HTMLElement;
       if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') return;
       if (step >= 1 && step <= 6) {
-        if (e.key >= '0' && e.key <= '9') {
-          e.preventDefault();
-          updateResponse(RATING_QUESTIONS[step - 1].id, parseInt(e.key));
-        } else if (e.key === ')' || (e.shiftKey && e.key === '0')) {
-          e.preventDefault();
-          updateResponse(RATING_QUESTIONS[step - 1].id, 10);
-        }
+        if (e.key >= '0' && e.key <= '9') { e.preventDefault(); updateResponse(RATING_QUESTIONS[step - 1].id, parseInt(e.key)); }
+        else if (e.key === ')' || (e.shiftKey && e.key === '0')) { e.preventDefault(); updateResponse(RATING_QUESTIONS[step - 1].id, 10); }
       }
-      if (e.key === 'ArrowRight' || e.key === 'Enter') {
-        if (canProceed()) {
-          e.preventDefault();
-          if (step < 14) setStep(s => s + 1);
-        }
-      }
-      if (e.key === 'ArrowLeft' && step > 0) {
-        e.preventDefault();
-        setStep(s => Math.max(0, s - 1));
-      }
+      if (e.key === 'ArrowRight' || e.key === 'Enter') { if (canProceed()) { e.preventDefault(); if (step < 14) setStep(s => s + 1); } }
+      if (e.key === 'ArrowLeft' && step > 0) { e.preventDefault(); setStep(s => Math.max(0, s - 1)); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -391,7 +325,6 @@ export default function PulseSurvey() {
   const updateResponse = (id: string, value: any) => {
     const previous = responses[id];
     if (previous !== undefined && previous !== value) {
-      // Track value change
       const existing = questionEventsRef.current[id];
       questionEventsRef.current[id] = {
         ...(existing || { question_id: id, question_type: 'rating', time_on_question_ms: 0, edit_count: 0, value_changes: [], final_value: '', word_count: 0, char_count: 0, was_skipped: false }),
@@ -402,19 +335,13 @@ export default function PulseSurvey() {
     setResponses(prev => ({ ...prev, [id]: value }));
   };
 
-  const updateRatingComment = (id: string, value: string) => {
-    setRatingComments(prev => ({ ...prev, [id]: value }));
-  };
-
+  const updateRatingComment = (id: string, value: string) => setRatingComments(prev => ({ ...prev, [id]: value }));
   const startSurvey = () => setMode('name');
-
   const proceedFromName = () => {
     if (firstName.trim().length === 0) return;
     if (!startedAt) setStartedAt(new Date().toISOString());
-    setMode('survey');
-    setStep(0);
-    stepStartTimeRef.current = Date.now();
-    previousStepRef.current = 0;
+    setMode('survey'); setStep(0);
+    stepStartTimeRef.current = Date.now(); previousStepRef.current = 0;
   };
 
   const submitSurvey = async () => {
@@ -422,112 +349,62 @@ export default function PulseSurvey() {
     const completedAt = new Date().toISOString();
     const completedDate = new Date(completedAt);
     const durationSec = startedAt ? Math.round((completedDate.getTime() - new Date(startedAt).getTime()) / 1000) : null;
-
-    // Capture last step's time before submitting
     const elapsed = Date.now() - stepStartTimeRef.current;
     if (previousStepRef.current >= 1 && previousStepRef.current <= 6) {
       const q = RATING_QUESTIONS[previousStepRef.current - 1];
-      const existing = questionEventsRef.current[q.id];
-      if (existing) {
-        existing.time_on_question_ms += elapsed;
-      }
+      const ex = questionEventsRef.current[q.id];
+      if (ex) ex.time_on_question_ms += elapsed;
     }
     if (previousStepRef.current >= 8 && previousStepRef.current <= 13) {
       const q = OPEN_QUESTIONS[previousStepRef.current - 8];
-      const existing = questionEventsRef.current[q.id];
-      if (existing) {
-        existing.time_on_question_ms += elapsed;
-      }
+      const ex = questionEventsRef.current[q.id];
+      if (ex) ex.time_on_question_ms += elapsed;
     }
-
-    // Compute derived fields
     const ratingVals = RATING_QUESTIONS.map(q => responses[q.id]).filter((v: any) => typeof v === 'number');
     const ratingAvg = ratingVals.length ? mean(ratingVals) : null;
     const ratingMin = ratingVals.length ? Math.min(...ratingVals) : null;
     const ratingMax = ratingVals.length ? Math.max(...ratingVals) : null;
     const ratingStdev = ratingVals.length > 1 ? stdev(ratingVals) : 0;
-
     let npsClassification: string | null = null;
     if (ratingAvg !== null) {
       if (ratingAvg >= 9) npsClassification = 'promoter';
       else if (ratingAvg >= 7) npsClassification = 'passive';
       else npsClassification = 'detractor';
     }
-
     const allOpenText = OPEN_QUESTIONS.map(q => responses[q.id] || '').join(' ');
     const allCommentText = RATING_QUESTIONS.map(q => ratingComments[q.id] || '').join(' ');
     const totalText = `${allOpenText} ${allCommentText}`;
-
     const skippedOpenCount = OPEN_QUESTIONS.filter(q => !(responses[q.id] || '').trim()).length;
-
-    // Aggregate behavioral signals
     const allEvents = Object.values(questionEventsRef.current);
     const totalEdits = allEvents.reduce((s, e) => s + (e.edit_count || 0), 0);
     const ratingChanges = allEvents.filter(e => e.question_type === 'rating').reduce((s, e) => s + (e.edit_count || 0), 0);
-
-    // Hesitation score: avg time on rating questions normalized
     const ratingTimes = allEvents.filter(e => e.question_type === 'rating').map(e => e.time_on_question_ms);
     const hesitationScore = ratingTimes.length ? mean(ratingTimes) / 1000 : null;
 
     const row = {
-      first_name: firstName.trim(),
-      name_key: firstName.trim().toLowerCase(),
-      started_at: startedAt,
-      submitted_at: completedAt,
-      duration_sec: durationSec,
-      responses,
-      rating_comments: ratingComments,
-      // V2 metadata
-      survey_version: SURVEY_VERSION,
-      device_type: detectDeviceType(),
+      first_name: firstName.trim(), name_key: firstName.trim().toLowerCase(),
+      started_at: startedAt, submitted_at: completedAt, duration_sec: durationSec,
+      responses, rating_comments: ratingComments,
+      survey_version: SURVEY_VERSION, device_type: detectDeviceType(),
       user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
       timezone: typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : null,
-      day_of_week: completedDate.getDay(),
-      hour_of_day: completedDate.getHours(),
-      // Behavioral aggregates
-      total_edits: totalEdits,
-      rating_changes: ratingChanges,
-      skipped_open_count: skippedOpenCount,
-      hesitation_score: hesitationScore,
-      // Pre-computed derived fields
-      rating_avg: ratingAvg,
-      rating_min: ratingMin,
-      rating_max: ratingMax,
-      rating_stdev: ratingStdev,
-      nps_classification: npsClassification,
-      total_word_count: wordCount(totalText),
-      total_char_count: charCount(totalText)
+      day_of_week: completedDate.getDay(), hour_of_day: completedDate.getHours(),
+      total_edits: totalEdits, rating_changes: ratingChanges,
+      skipped_open_count: skippedOpenCount, hesitation_score: hesitationScore,
+      rating_avg: ratingAvg, rating_min: ratingMin, rating_max: ratingMax,
+      rating_stdev: ratingStdev, nps_classification: npsClassification,
+      total_word_count: wordCount(totalText), total_char_count: charCount(totalText)
     };
 
     try {
       const inserted = await sb.insert(row);
       const newRow = Array.isArray(inserted) ? inserted[0] : inserted;
       const responseId = newRow.id;
-
-      // Insert behavioral events linked to this response
       if (allEvents.length > 0) {
-        const eventRows = allEvents.map(e => ({
-          response_id: responseId,
-          question_id: e.question_id,
-          question_type: e.question_type,
-          time_on_question_ms: e.time_on_question_ms,
-          edit_count: e.edit_count,
-          value_changes: e.value_changes,
-          final_value: e.final_value,
-          word_count: e.word_count,
-          char_count: e.char_count,
-          was_skipped: e.was_skipped
-        }));
-        try {
-          await sb.insertEvents(eventRows);
-        } catch (e) {
-          console.warn('Events insert failed, continuing anyway:', e);
-        }
+        const eventRows = allEvents.map(e => ({ response_id: responseId, ...e }));
+        try { await sb.insertEvents(eventRows); } catch (e) { console.warn('Events insert failed:', e); }
       }
-
-      // Trigger AI processing in the background — don't block UI
       sb.triggerProcessing(responseId);
-
       try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
       setMode('complete');
     } catch (e: any) {
@@ -538,21 +415,12 @@ export default function PulseSurvey() {
     }
   };
 
-  const openAdminLogin = () => {
-    setAdminPass('');
-    setAdminError('');
-    setMode('admin-login');
-  };
+  const openAdminLogin = () => { setAdminPass(''); setAdminError(''); setMode('admin-login'); };
 
   const tryAdminLogin = async () => {
-    if (adminPass !== ADMIN_PASSCODE) {
-      setAdminError('Incorrect passcode.');
-      return;
-    }
-    setAdminError('');
-    setMode('admin');
-    setAdminView('dashboard');
-    await loadResponses();
+    if (adminPass !== ADMIN_PASSCODE) { setAdminError('Incorrect passcode.'); return; }
+    setAdminError(''); setMode('admin'); setAdminView('dashboard');
+    await Promise.all([loadResponses(), loadBriefing()]);
   };
 
   const loadResponses = async () => {
@@ -569,11 +437,36 @@ export default function PulseSurvey() {
     }
   };
 
+  const loadBriefing = async () => {
+    try {
+      const b = await sb.getLatestBriefing();
+      setBriefing(adaptBriefing(b));
+    } catch (e: any) {
+      console.error('Briefing load failed:', e);
+    }
+  };
+
+  const generateBriefing = async () => {
+    setGeneratingBriefing(true);
+    try {
+      const result = await sb.generateBriefing();
+      if (result.briefing) {
+        setBriefing(adaptBriefing(result.briefing));
+        setToast({ kind: 'success', message: 'Briefing refreshed.' });
+      } else if (result.error) {
+        throw new Error(result.error);
+      }
+    } catch (e: any) {
+      setToast({ kind: 'error', message: `Briefing generation failed: ${e.message}` });
+    } finally {
+      setGeneratingBriefing(false);
+    }
+  };
+
   const reprocessResponse = async (id: string) => {
     try {
       const res = await fetch(PROCESS_FN, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ response_id: id })
       });
       if (!res.ok) throw new Error(`Status ${res.status}`);
@@ -591,17 +484,11 @@ export default function PulseSurvey() {
       ...OPEN_QUESTIONS.map(q => q.text)];
     const rows = allResponses.map(r => {
       const row: any[] = [
-        r.firstName || '',
-        new Date(r.submittedAt).toLocaleString(),
-        r.durationSec ?? '',
-        r.deviceType ?? '',
-        r.ratingAvg !== null ? r.ratingAvg.toFixed(2) : '',
-        r.npsClassification ?? '',
-        r.totalEdits ?? '',
-        r.aiEmotionalTone ?? '',
-        r.aiSentimentOverall ?? '',
-        (r.aiThemes || []).join('; '),
-        (r.aiSummary || '').replace(/"/g, '""')
+        r.firstName || '', new Date(r.submittedAt).toLocaleString(), r.durationSec ?? '',
+        r.deviceType ?? '', r.ratingAvg !== null ? r.ratingAvg.toFixed(2) : '',
+        r.npsClassification ?? '', r.totalEdits ?? '',
+        r.aiEmotionalTone ?? '', r.aiSentimentOverall ?? '',
+        (r.aiThemes || []).join('; '), (r.aiSummary || '').replace(/"/g, '""')
       ];
       RATING_QUESTIONS.forEach(q => row.push(r.responses?.[q.id] ?? ''));
       RATING_QUESTIONS.forEach(q => row.push((r.ratingComments?.[q.id] || '').replace(/"/g, '""')));
@@ -612,20 +499,16 @@ export default function PulseSurvey() {
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `atm-pulse-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
+    a.href = url; a.download = `atm-pulse-${new Date().toISOString().split('T')[0]}.csv`; a.click();
     URL.revokeObjectURL(url);
   };
 
   const exportJSON = () => {
     if (!allResponses.length) return;
-    const blob = new Blob([JSON.stringify(allResponses, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ briefing, submissions: allResponses }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `atm-pulse-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
+    a.href = url; a.download = `atm-pulse-${new Date().toISOString().split('T')[0]}.json`; a.click();
     URL.revokeObjectURL(url);
   };
 
@@ -659,14 +542,7 @@ export default function PulseSurvey() {
     if (!allResponses.length) return null;
     const dimStats = RATING_QUESTIONS.map(q => {
       const vals = allResponses.map(r => r.responses?.[q.id]).filter((v: any) => typeof v === 'number');
-      return {
-        ...q,
-        mean: vals.length ? mean(vals) : null,
-        stdev: vals.length ? stdev(vals) : 0,
-        nps: computeNPS(vals),
-        n: vals.length,
-        values: vals
-      };
+      return { ...q, mean: vals.length ? mean(vals) : null, stdev: vals.length ? stdev(vals) : 0, nps: computeNPS(vals), n: vals.length, values: vals };
     });
     const overallVals = allResponses.flatMap(r => RATING_QUESTIONS.map(q => r.responses?.[q.id]).filter((v: any) => typeof v === 'number'));
     const overallMean = overallVals.length ? mean(overallVals) : null;
@@ -681,49 +557,14 @@ export default function PulseSurvey() {
       if (!byPerson[key]) byPerson[key] = [];
       byPerson[key].push(r);
     });
-    Object.keys(byPerson).forEach(k => {
-      byPerson[k].sort((a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
-    });
+    Object.keys(byPerson).forEach(k => byPerson[k].sort((a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime()));
     const uniquePeople = Object.keys(byPerson).length;
-    const trending = Object.entries(byPerson)
-      .filter(([_, subs]) => subs.length > 1)
-      .map(([key, subs]) => {
-        const first = subs[0];
-        const latest = subs[subs.length - 1];
-        const firstMean = mean(RATING_QUESTIONS.map(q => first.responses?.[q.id]).filter((v: any) => typeof v === 'number'));
-        const latestMean = mean(RATING_QUESTIONS.map(q => latest.responses?.[q.id]).filter((v: any) => typeof v === 'number'));
-        return { key, name: latest.firstName, delta: latestMean - firstMean, first: firstMean, latest: latestMean, n: subs.length };
-      });
-
-    // Detractor flags from rating data
-    const detractorFlags: any[] = [];
-    Object.values(byPerson).forEach(subs => {
-      const latest = subs[subs.length - 1];
-      RATING_QUESTIONS.forEach(q => {
-        const val = latest.responses?.[q.id];
-        if (typeof val === 'number' && val <= 6) {
-          detractorFlags.push({
-            name: latest.firstName,
-            dim: q.dim,
-            question: q.text,
-            value: val,
-            comment: latest.ratingComments?.[q.id] || null,
-            responseId: latest.id
-          });
-        }
-      });
+    const trending = Object.entries(byPerson).filter(([_, subs]) => subs.length > 1).map(([key, subs]) => {
+      const first = subs[0]; const latest = subs[subs.length - 1];
+      const fa = mean(RATING_QUESTIONS.map(q => first.responses?.[q.id]).filter((v: any) => typeof v === 'number'));
+      const la = mean(RATING_QUESTIONS.map(q => latest.responses?.[q.id]).filter((v: any) => typeof v === 'number'));
+      return { key, name: latest.firstName, delta: la - fa, first: fa, latest: la, n: subs.length };
     });
-
-    // AI-powered insights
-    const aiAnomalies: any[] = [];
-    Object.values(byPerson).forEach(subs => {
-      const latest = subs[subs.length - 1];
-      (latest.aiAnomalyFlags || []).forEach((flag: any) => {
-        aiAnomalies.push({ ...flag, name: latest.firstName, responseId: latest.id });
-      });
-    });
-
-    // Theme frequency map
     const themeMap: Record<string, { count: number; people: Set<string> }> = {};
     allResponses.forEach(r => {
       (r.aiThemes || []).forEach((t: string) => {
@@ -732,20 +573,12 @@ export default function PulseSurvey() {
         if (r.firstName) themeMap[t].people.add(r.firstName);
       });
     });
-    const topThemes = Object.entries(themeMap)
-      .map(([theme, data]) => ({ theme, count: data.count, peopleCount: data.people.size }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 12);
-
+    const topThemes = Object.entries(themeMap).map(([theme, data]) => ({ theme, count: data.count, peopleCount: data.people.size })).sort((a, b) => b.count - a.count).slice(0, 12);
     const processedCount = allResponses.filter(r => r.aiProcessedAt).length;
-
-    return {
-      dimStats, overallMean, overallNPS, constraint, strongest, highestVariance,
-      byPerson, uniquePeople, trending, detractorFlags, aiAnomalies, topThemes,
-      totalSubmissions: allResponses.length, processedCount
-    };
+    return { dimStats, overallMean, overallNPS, constraint, strongest, highestVariance, byPerson, uniquePeople, trending, topThemes, totalSubmissions: allResponses.length, processedCount };
   }, [allResponses]);
 
+  // ==================== WELCOME ====================
   if (mode === 'welcome') {
     const hasDraft = Object.keys(responses).length > 0 || firstName.length > 0;
     return (
@@ -759,31 +592,20 @@ export default function PulseSurvey() {
                   <Heart className="w-8 h-8 text-white" fill="white" />
                 </div>
               </div>
-              <h1 className="text-4xl md:text-5xl font-serif text-stone-800 text-center mb-4 leading-tight">
-                A quick team check-in
-              </h1>
-              <p className="text-lg text-stone-600 text-center leading-relaxed mb-6">
-                Short, honest pulse survey about how things are going for you. Your answers go straight to Ashton — no filter.
-              </p>
+              <h1 className="text-4xl md:text-5xl font-serif text-stone-800 text-center mb-4 leading-tight">A quick team check-in</h1>
+              <p className="text-lg text-stone-600 text-center leading-relaxed mb-6">Short, honest pulse survey about how things are going for you. Your answers go straight to Ashton — no filter.</p>
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 mb-8">
-                <p className="text-stone-700 leading-relaxed">
-                  <strong>6 ratings</strong> (with optional &quot;why&quot; after each) and <strong>6 short reflections</strong>. About 10 minutes. Be as honest as you want — that is the whole point.
-                </p>
+                <p className="text-stone-700 leading-relaxed"><strong>6 ratings</strong> (with optional &quot;why&quot; after each) and <strong>6 short reflections</strong>. About 10 minutes. Be as honest as you want — that is the whole point.</p>
               </div>
               <button onClick={startSurvey} className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-medium py-4 px-8 rounded-2xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 text-lg">
-                {hasDraft ? 'Continue where you left off' : 'Begin'}
-                <ChevronRight className="w-5 h-5" />
+                {hasDraft ? 'Continue where you left off' : 'Begin'}<ChevronRight className="w-5 h-5" />
               </button>
               {hasDraft && (
-                <button onClick={() => { setResponses({}); setRatingComments({}); setFirstName(''); setStartedAt(null); questionEventsRef.current = {}; }} className="w-full mt-3 text-stone-500 hover:text-stone-700 text-sm py-2">
-                  Start over instead
-                </button>
+                <button onClick={() => { setResponses({}); setRatingComments({}); setFirstName(''); setStartedAt(null); questionEventsRef.current = {}; }} className="w-full mt-3 text-stone-500 hover:text-stone-700 text-sm py-2">Start over instead</button>
               )}
             </div>
             <div className="text-center mt-6">
-              <button onClick={openAdminLogin} className="text-stone-400 hover:text-stone-600 text-sm inline-flex items-center gap-1">
-                <Lock className="w-3 h-3" /> Admin
-              </button>
+              <button onClick={openAdminLogin} className="text-stone-400 hover:text-stone-600 text-sm inline-flex items-center gap-1"><Lock className="w-3 h-3" /> Admin</button>
             </div>
           </div>
         </div>
@@ -796,21 +618,11 @@ export default function PulseSurvey() {
       <div className="min-h-screen bg-gradient-to-br from-stone-50 via-amber-50 to-orange-50 flex items-center justify-center p-6">
         <div className="max-w-xl w-full">
           <div className="bg-white rounded-3xl shadow-xl p-10 md:p-14">
-            <div className="flex justify-center mb-6">
-              <div className="w-14 h-14 bg-amber-100 rounded-2xl flex items-center justify-center">
-                <User className="w-7 h-7 text-amber-700" />
-              </div>
-            </div>
-            <h2 className="text-3xl md:text-4xl font-serif text-stone-800 text-center mb-4 leading-tight">
-              First, who is this?
-            </h2>
-            <p className="text-stone-600 text-center mb-8 leading-relaxed">
-              Just your first name so Ashton can track your pulse over time.
-            </p>
+            <div className="flex justify-center mb-6"><div className="w-14 h-14 bg-amber-100 rounded-2xl flex items-center justify-center"><User className="w-7 h-7 text-amber-700" /></div></div>
+            <h2 className="text-3xl md:text-4xl font-serif text-stone-800 text-center mb-4 leading-tight">First, who is this?</h2>
+            <p className="text-stone-600 text-center mb-8 leading-relaxed">Just your first name so Ashton can track your pulse over time.</p>
             <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && proceedFromName()} placeholder="Your first name" className="w-full px-5 py-4 text-lg border border-stone-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent text-stone-700 mb-6" autoFocus />
-            <button onClick={proceedFromName} disabled={firstName.trim().length === 0} className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-4 px-8 rounded-2xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 text-lg">
-              Continue <ChevronRight className="w-5 h-5" />
-            </button>
+            <button onClick={proceedFromName} disabled={firstName.trim().length === 0} className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-4 px-8 rounded-2xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 text-lg">Continue <ChevronRight className="w-5 h-5" /></button>
             <button onClick={() => setMode('welcome')} className="w-full mt-3 text-stone-500 hover:text-stone-700 text-sm py-2">Back</button>
           </div>
         </div>
@@ -822,18 +634,12 @@ export default function PulseSurvey() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-stone-50 to-amber-50 flex items-center justify-center p-6">
         <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-10">
-          <div className="flex justify-center mb-6">
-            <div className="w-14 h-14 bg-stone-800 rounded-2xl flex items-center justify-center">
-              <Lock className="w-7 h-7 text-white" />
-            </div>
-          </div>
+          <div className="flex justify-center mb-6"><div className="w-14 h-14 bg-stone-800 rounded-2xl flex items-center justify-center"><Lock className="w-7 h-7 text-white" /></div></div>
           <h2 className="text-2xl font-serif text-stone-800 text-center mb-2">Admin Access</h2>
           <p className="text-stone-500 text-center mb-6 text-sm">Enter the passcode to view responses.</p>
           <div className="relative mb-4">
             <input type={showPass ? 'text' : 'password'} value={adminPass} onChange={(e) => setAdminPass(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && tryAdminLogin()} className="w-full px-4 py-3 pr-12 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" placeholder="Passcode" autoFocus />
-            <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600">
-              {showPass ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-            </button>
+            <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600">{showPass ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}</button>
           </div>
           {adminError && <p className="text-red-600 text-sm mb-4 text-center">{adminError}</p>}
           <button onClick={tryAdminLogin} className="w-full bg-stone-800 hover:bg-stone-900 text-white font-medium py-3 px-6 rounded-xl transition-all">Unlock</button>
@@ -848,7 +654,7 @@ export default function PulseSurvey() {
       <>
         {toast && <Toast {...toast} onClose={() => setToast(null)} />}
         <ConfirmDialog open={!!confirmDialog} title={confirmDialog?.title} message={confirmDialog?.message} onConfirm={confirmDialog?.onConfirm} onCancel={() => setConfirmDialog(null)} />
-        <AdminShell analytics={analytics} allResponses={allResponses} loading={loadingResponses} adminView={adminView} setAdminView={setAdminView} selectedResponse={selectedResponse} setSelectedResponse={setSelectedResponse} selectedPerson={selectedPerson} setSelectedPerson={setSelectedPerson} compareIds={compareIds} toggleCompare={toggleCompare} exportCSV={exportCSV} exportJSON={exportJSON} deleteResponse={requestDelete} reprocessResponse={reprocessResponse} setMode={setMode} refresh={loadResponses} />
+        <AdminShell analytics={analytics} allResponses={allResponses} loading={loadingResponses} adminView={adminView} setAdminView={setAdminView} selectedResponse={selectedResponse} setSelectedResponse={setSelectedResponse} selectedPerson={selectedPerson} setSelectedPerson={setSelectedPerson} compareIds={compareIds} toggleCompare={toggleCompare} exportCSV={exportCSV} exportJSON={exportJSON} deleteResponse={requestDelete} reprocessResponse={reprocessResponse} setMode={setMode} refresh={async () => { await Promise.all([loadResponses(), loadBriefing()]); }} briefing={briefing} generatingBriefing={generatingBriefing} generateBriefing={generateBriefing} />
       </>
     );
   }
@@ -857,11 +663,7 @@ export default function PulseSurvey() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-stone-50 via-amber-50 to-orange-50 flex items-center justify-center p-6">
         <div className="max-w-xl w-full bg-white rounded-3xl shadow-xl p-10 md:p-14 text-center">
-          <div className="flex justify-center mb-6">
-            <div className="w-20 h-20 bg-gradient-to-br from-green-400 to-emerald-600 rounded-full flex items-center justify-center shadow-lg">
-              <Check className="w-10 h-10 text-white" strokeWidth={3} />
-            </div>
-          </div>
+          <div className="flex justify-center mb-6"><div className="w-20 h-20 bg-gradient-to-br from-green-400 to-emerald-600 rounded-full flex items-center justify-center shadow-lg"><Check className="w-10 h-10 text-white" strokeWidth={3} /></div></div>
           <h1 className="text-4xl font-serif text-stone-800 mb-4">Thank you, {firstName}</h1>
           <p className="text-lg text-stone-600 leading-relaxed mb-2">Your responses have been sent to Ashton.</p>
           <p className="text-stone-500 leading-relaxed">Seriously — thank you for being honest. This matters.</p>
@@ -903,14 +705,10 @@ export default function PulseSurvey() {
               const isSelected = val === n;
               const seg = scaleToSegment(n);
               const segColor = seg === 'promoter' ? 'from-emerald-400 to-emerald-600' : seg === 'passive' ? 'from-amber-400 to-amber-600' : 'from-rose-400 to-rose-600';
-              return (
-                <button key={n} onClick={() => updateResponse(q.id, n)} className={`aspect-square rounded-xl flex items-center justify-center text-base md:text-lg font-medium transition-all ${isSelected ? `bg-gradient-to-br ${segColor} text-white shadow-lg scale-110` : 'bg-stone-100 hover:bg-stone-200 text-stone-700'}`}>{n}</button>
-              );
+              return <button key={n} onClick={() => updateResponse(q.id, n)} className={`aspect-square rounded-xl flex items-center justify-center text-base md:text-lg font-medium transition-all ${isSelected ? `bg-gradient-to-br ${segColor} text-white shadow-lg scale-110` : 'bg-stone-100 hover:bg-stone-200 text-stone-700'}`}>{n}</button>;
             })}
           </div>
-          <div className="flex justify-between text-xs text-stone-400 px-1 mb-6">
-            <span>Not at all</span><span>Absolutely</span>
-          </div>
+          <div className="flex justify-between text-xs text-stone-400 px-1 mb-6"><span>Not at all</span><span>Absolutely</span></div>
           {val !== undefined && val !== null && segment && (
             <div className={`rounded-2xl border p-4 mb-4 transition-all ${SEGMENT_META[segment].bg} ${SEGMENT_META[segment].border}`}>
               <div className="flex items-center gap-2 mb-2">
@@ -952,8 +750,7 @@ export default function PulseSurvey() {
             <h3 className="text-sm font-semibold text-stone-500 uppercase tracking-wide mb-3">Ratings</h3>
             <div className="bg-stone-50 rounded-2xl p-5 space-y-3">
               {RATING_QUESTIONS.map(q => {
-                const val = responses[q.id];
-                const seg = scaleToSegment(val);
+                const val = responses[q.id]; const seg = scaleToSegment(val);
                 return (
                   <div key={q.id} className="py-1.5">
                     <div className="flex justify-between items-center gap-3">
@@ -997,17 +794,11 @@ export default function PulseSurvey() {
           <div className="bg-white rounded-3xl shadow-xl p-8 md:p-12 min-h-[480px] flex flex-col">
             <div className="flex-1">{renderStep()}</div>
             <div className="flex justify-between items-center pt-8 mt-6 border-t border-stone-100">
-              <button onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0} className="text-stone-500 hover:text-stone-800 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1 font-medium">
-                <ChevronLeft className="w-4 h-4" /> Back
-              </button>
+              <button onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0} className="text-stone-500 hover:text-stone-800 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1 font-medium"><ChevronLeft className="w-4 h-4" /> Back</button>
               {step < totalSteps ? (
-                <button onClick={() => setStep(step + 1)} disabled={!canProceed()} className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-2">
-                  {step === 0 || step === 7 ? 'Begin' : 'Next'} <ChevronRight className="w-4 h-4" />
-                </button>
+                <button onClick={() => setStep(step + 1)} disabled={!canProceed()} className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-3 px-6 rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-2">{step === 0 || step === 7 ? 'Begin' : 'Next'} <ChevronRight className="w-4 h-4" /></button>
               ) : (
-                <button onClick={submitSurvey} disabled={submitting} className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:opacity-50 text-white font-medium py-3 px-8 rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-2">
-                  {submitting ? (<><RefreshCw className="w-4 h-4 animate-spin" /> Submitting...</>) : (<><Check className="w-4 h-4" /> Submit</>)}
-                </button>
+                <button onClick={submitSurvey} disabled={submitting} className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:opacity-50 text-white font-medium py-3 px-8 rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-2">{submitting ? (<><RefreshCw className="w-4 h-4 animate-spin" /> Submitting...</>) : (<><Check className="w-4 h-4" /> Submit</>)}</button>
               )}
             </div>
           </div>
@@ -1019,7 +810,7 @@ export default function PulseSurvey() {
 }
 
 // ==================== ADMIN ====================
-function AdminShell({ analytics, allResponses, loading, adminView, setAdminView, selectedResponse, setSelectedResponse, selectedPerson, setSelectedPerson, compareIds, toggleCompare, exportCSV, exportJSON, deleteResponse, reprocessResponse, setMode, refresh }: any) {
+function AdminShell({ analytics, allResponses, loading, adminView, setAdminView, selectedResponse, setSelectedResponse, selectedPerson, setSelectedPerson, compareIds, toggleCompare, exportCSV, exportJSON, deleteResponse, reprocessResponse, setMode, refresh, briefing, generatingBriefing, generateBriefing }: any) {
   const TabBtn = ({ id, children, icon: Icon }: any) => (
     <button onClick={() => setAdminView(id)} className={`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-2 ${adminView === id ? 'bg-stone-800 text-white' : 'text-stone-600 hover:bg-stone-200'}`}>
       {Icon && <Icon className="w-4 h-4" />}{children}
@@ -1034,15 +825,9 @@ function AdminShell({ analytics, allResponses, loading, adminView, setAdminView,
             <p className="text-stone-500 text-xs">{allResponses.length} submissions · {analytics?.uniquePeople || 0} {analytics?.uniquePeople === 1 ? 'person' : 'people'} · {analytics?.processedCount || 0} AI-processed</p>
           </div>
           <div className="flex gap-2 items-center">
-            <button onClick={refresh} disabled={loading} className="bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-40 text-stone-700 px-3 py-2 rounded-lg flex items-center gap-1.5 text-sm font-medium">
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
-            </button>
-            <button onClick={exportCSV} disabled={!allResponses.length} className="bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-40 text-stone-700 px-3 py-2 rounded-lg flex items-center gap-1.5 text-sm font-medium">
-              <FileSpreadsheet className="w-4 h-4" /> CSV
-            </button>
-            <button onClick={exportJSON} disabled={!allResponses.length} className="bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-40 text-stone-700 px-3 py-2 rounded-lg flex items-center gap-1.5 text-sm font-medium">
-              <FileJson className="w-4 h-4" /> JSON
-            </button>
+            <button onClick={refresh} disabled={loading} className="bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-40 text-stone-700 px-3 py-2 rounded-lg flex items-center gap-1.5 text-sm font-medium"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh</button>
+            <button onClick={exportCSV} disabled={!allResponses.length} className="bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-40 text-stone-700 px-3 py-2 rounded-lg flex items-center gap-1.5 text-sm font-medium"><FileSpreadsheet className="w-4 h-4" /> CSV</button>
+            <button onClick={exportJSON} disabled={!allResponses.length} className="bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-40 text-stone-700 px-3 py-2 rounded-lg flex items-center gap-1.5 text-sm font-medium"><FileJson className="w-4 h-4" /> JSON</button>
             <button onClick={() => setMode('welcome')} className="bg-stone-800 hover:bg-stone-900 text-white px-4 py-2 rounded-lg text-sm font-medium">Exit</button>
           </div>
         </div>
@@ -1060,7 +845,7 @@ function AdminShell({ analytics, allResponses, loading, adminView, setAdminView,
             <p className="text-stone-500">Loading responses from database...</p>
           </div>
         ) : (<>
-          {adminView === 'dashboard' && <Dashboard analytics={analytics} allResponses={allResponses} onSelectResponse={(r: any) => { setSelectedResponse(r); setAdminView('detail'); }} onSelectPerson={(key: string) => { setSelectedPerson(key); setAdminView('person'); }} />}
+          {adminView === 'dashboard' && <Dashboard analytics={analytics} allResponses={allResponses} briefing={briefing} generatingBriefing={generatingBriefing} generateBriefing={generateBriefing} onSelectResponse={(r: any) => { setSelectedResponse(r); setAdminView('detail'); }} onSelectPerson={(key: string) => { setSelectedPerson(key); setAdminView('person'); }} />}
           {adminView === 'list' && <ResponseList responses={allResponses} onSelect={(r: any) => { setSelectedResponse(r); setAdminView('detail'); }} compareIds={compareIds} toggleCompare={toggleCompare} />}
           {adminView === 'people' && <PeopleView analytics={analytics} onSelectPerson={(key: string) => { setSelectedPerson(key); setAdminView('person'); }} />}
           {adminView === 'detail' && selectedResponse && <ResponseDetail response={selectedResponse} onBack={() => setAdminView('list')} onDelete={deleteResponse} onReprocess={reprocessResponse} />}
@@ -1072,7 +857,161 @@ function AdminShell({ analytics, allResponses, loading, adminView, setAdminView,
   );
 }
 
-function Dashboard({ analytics, allResponses, onSelectResponse, onSelectPerson }: any) {
+// ==================== BRIEFING (HERO) ====================
+function BriefingSection({ briefing, allResponses, generatingBriefing, generateBriefing }: any) {
+  const totalSubmissions = allResponses.length;
+  const newSinceLastBriefing = briefing ? Math.max(0, totalSubmissions - briefing.submissionCountAtGeneration) : 0;
+  const briefingAge = briefing ? Math.round((Date.now() - new Date(briefing.generatedAt).getTime()) / (1000 * 60)) : 0;
+  const ageDisplay = briefingAge < 60 ? `${briefingAge}m ago` : briefingAge < 1440 ? `${Math.round(briefingAge / 60)}h ago` : `${Math.round(briefingAge / 1440)}d ago`;
+
+  if (!briefing && !generatingBriefing) {
+    return (
+      <div className="bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 rounded-3xl p-10 text-center text-white shadow-xl">
+        <div className="flex justify-center mb-4">
+          <div className="w-14 h-14 bg-white/10 rounded-2xl flex items-center justify-center backdrop-blur"><Wand2 className="w-7 h-7 text-amber-300" /></div>
+        </div>
+        <h2 className="text-2xl font-serif mb-2">Get your briefing</h2>
+        <p className="text-stone-300 mb-6 max-w-md mx-auto">Claude will synthesize all {totalSubmissions} submission{totalSubmissions !== 1 ? 's' : ''} into a CEO-ready briefing — what&apos;s working, what&apos;s breaking, who to talk to, and what it all means.</p>
+        <button onClick={generateBriefing} disabled={!totalSubmissions} className="bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-500 hover:to-orange-600 disabled:opacity-40 text-stone-900 font-semibold py-3 px-6 rounded-xl shadow-lg transition-all inline-flex items-center gap-2">
+          <Wand2 className="w-4 h-4" /> Generate Briefing
+        </button>
+        {!totalSubmissions && <p className="text-stone-400 text-sm mt-3">No submissions yet.</p>}
+      </div>
+    );
+  }
+
+  if (generatingBriefing && !briefing) {
+    return (
+      <div className="bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 rounded-3xl p-10 text-center text-white shadow-xl">
+        <RefreshCw className="w-8 h-8 text-amber-300 animate-spin mx-auto mb-4" />
+        <p className="text-stone-200">Synthesizing your team&apos;s pulse...</p>
+        <p className="text-stone-400 text-sm mt-2">Claude is reading every submission. Takes about 20 seconds.</p>
+      </div>
+    );
+  }
+
+  if (briefing.generationError) {
+    return (
+      <div className="bg-rose-50 border border-rose-200 rounded-3xl p-6">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0 mt-1" />
+          <div className="flex-1">
+            <p className="font-medium text-rose-800">Briefing generation failed</p>
+            <p className="text-rose-700 text-sm mt-1">{briefing.generationError}</p>
+            <button onClick={generateBriefing} disabled={generatingBriefing} className="mt-3 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg font-medium">Try Again</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 rounded-3xl p-8 md:p-10 text-white shadow-xl">
+      <div className="flex items-start justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center backdrop-blur"><Wand2 className="w-5 h-5 text-amber-300" /></div>
+          <div>
+            <p className="text-xs font-semibold text-amber-300 uppercase tracking-wider">CEO Briefing</p>
+            <p className="text-stone-400 text-xs">{ageDisplay} · based on {briefing.submissionCountAtGeneration} submission{briefing.submissionCountAtGeneration !== 1 ? 's' : ''} from {briefing.uniquePeopleAtGeneration} {briefing.uniquePeopleAtGeneration === 1 ? 'person' : 'people'}{newSinceLastBriefing > 0 ? ` · ${newSinceLastBriefing} new since` : ''}</p>
+          </div>
+        </div>
+        <button onClick={generateBriefing} disabled={generatingBriefing} className="bg-white/10 hover:bg-white/20 disabled:opacity-40 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 text-sm font-medium backdrop-blur transition-all">
+          {generatingBriefing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          {generatingBriefing ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
+
+      {briefing.headline && (
+        <h1 className="text-2xl md:text-3xl font-serif leading-tight mb-6 text-white">{briefing.headline}</h1>
+      )}
+
+      {briefing.pulseRead && (
+        <p className="text-stone-200 leading-relaxed mb-8 text-lg">{briefing.pulseRead}</p>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {briefing.whatsWorking && briefing.whatsWorking.length > 0 && (
+          <div className="bg-white/5 backdrop-blur rounded-2xl p-5 border border-emerald-500/20">
+            <div className="flex items-center gap-2 mb-3"><div className="w-2 h-2 bg-emerald-400 rounded-full" /><p className="text-xs font-semibold text-emerald-300 uppercase tracking-wider">What&apos;s Working</p></div>
+            <ul className="space-y-2">
+              {briefing.whatsWorking.map((item: string, i: number) => (
+                <li key={i} className="text-stone-200 text-sm leading-relaxed flex items-start gap-2"><span className="text-emerald-400 flex-shrink-0">→</span><span>{item}</span></li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {briefing.whatsBreaking && briefing.whatsBreaking.length > 0 && (
+          <div className="bg-white/5 backdrop-blur rounded-2xl p-5 border border-rose-500/20">
+            <div className="flex items-center gap-2 mb-3"><div className="w-2 h-2 bg-rose-400 rounded-full" /><p className="text-xs font-semibold text-rose-300 uppercase tracking-wider">What&apos;s Breaking</p></div>
+            <ul className="space-y-2">
+              {briefing.whatsBreaking.map((item: string, i: number) => (
+                <li key={i} className="text-stone-200 text-sm leading-relaxed flex items-start gap-2"><span className="text-rose-400 flex-shrink-0">→</span><span>{item}</span></li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {briefing.quietlyConcerning && briefing.quietlyConcerning.length > 0 && (
+          <div className="bg-white/5 backdrop-blur rounded-2xl p-5 border border-amber-500/20">
+            <div className="flex items-center gap-2 mb-3"><div className="w-2 h-2 bg-amber-400 rounded-full" /><p className="text-xs font-semibold text-amber-300 uppercase tracking-wider">Quietly Concerning</p></div>
+            <ul className="space-y-2">
+              {briefing.quietlyConcerning.map((item: string, i: number) => (
+                <li key={i} className="text-stone-200 text-sm leading-relaxed flex items-start gap-2"><span className="text-amber-400 flex-shrink-0">→</span><span>{item}</span></li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {briefing.peopleToTalkTo && briefing.peopleToTalkTo.length > 0 && (
+        <div className="bg-white/5 backdrop-blur rounded-2xl p-5 mb-6 border border-purple-500/20">
+          <div className="flex items-center gap-2 mb-4"><Users className="w-4 h-4 text-purple-300" /><p className="text-xs font-semibold text-purple-300 uppercase tracking-wider">People to Talk to</p></div>
+          <div className="space-y-4">
+            {briefing.peopleToTalkTo.map((p: any, i: number) => (
+              <div key={i} className="border-l-2 border-purple-400/50 pl-4">
+                <p className="font-semibold text-white mb-1">{p.name}</p>
+                <p className="text-stone-300 text-sm mb-2 leading-relaxed">{p.why}</p>
+                {p.suggested_approach && (
+                  <div className="bg-purple-500/10 rounded-lg p-3 mt-2">
+                    <p className="text-xs text-purple-300 uppercase tracking-wider mb-1 font-semibold">Suggested approach</p>
+                    <p className="text-stone-200 text-sm leading-relaxed italic">{p.suggested_approach}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {briefing.themesCompounding && briefing.themesCompounding.length > 0 && (
+        <div className="bg-white/5 backdrop-blur rounded-2xl p-5 mb-6 border border-blue-500/20">
+          <div className="flex items-center gap-2 mb-3"><Activity className="w-4 h-4 text-blue-300" /><p className="text-xs font-semibold text-blue-300 uppercase tracking-wider">Themes Compounding</p></div>
+          <ul className="space-y-2">
+            {briefing.themesCompounding.map((item: string, i: number) => (
+              <li key={i} className="text-stone-200 text-sm leading-relaxed flex items-start gap-2"><span className="text-blue-400 flex-shrink-0">→</span><span>{item}</span></li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {briefing.theQuote && briefing.theQuote.quote && (
+        <div className="border-t border-white/10 pt-6 mt-6">
+          <div className="flex items-start gap-3">
+            <Quote className="w-6 h-6 text-amber-300 flex-shrink-0 mt-1" />
+            <div>
+              <p className="text-xl font-serif text-white italic leading-relaxed mb-2">&ldquo;{briefing.theQuote.quote}&rdquo;</p>
+              <p className="text-stone-400 text-sm">— {briefing.theQuote.who}</p>
+              {briefing.theQuote.why_it_matters && (
+                <p className="text-stone-300 text-sm mt-2 leading-relaxed">{briefing.theQuote.why_it_matters}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Dashboard({ analytics, allResponses, briefing, generatingBriefing, generateBriefing, onSelectResponse, onSelectPerson }: any) {
   if (!analytics || !allResponses.length) {
     return (
       <div className="bg-white rounded-2xl p-16 text-center">
@@ -1081,9 +1020,11 @@ function Dashboard({ analytics, allResponses, onSelectResponse, onSelectPerson }
       </div>
     );
   }
-  const { dimStats, overallMean, overallNPS, constraint, strongest, highestVariance, trending, detractorFlags, aiAnomalies, topThemes, uniquePeople, totalSubmissions } = analytics;
+  const { dimStats, overallMean, overallNPS, constraint, strongest, highestVariance, trending, topThemes, uniquePeople, totalSubmissions } = analytics;
   return (
     <div className="space-y-6">
+      <BriefingSection briefing={briefing} allResponses={allResponses} generatingBriefing={generatingBriefing} generateBriefing={generateBriefing} />
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <MetricCard label="Team Pulse" value={overallMean !== null ? overallMean.toFixed(1) : '—'} suffix="/ 10" tone={overallMean >= 7 ? 'good' : overallMean >= 5 ? 'neutral' : 'bad'} subtext={`Avg across ${uniquePeople} ${uniquePeople === 1 ? 'person' : 'people'}`} />
         <MetricCard label="eNPS" value={overallNPS !== null ? (overallNPS > 0 ? `+${overallNPS}` : `${overallNPS}`) : '—'} tone={overallNPS >= 30 ? 'good' : overallNPS >= 0 ? 'neutral' : 'bad'} subtext={overallNPS >= 30 ? 'Strong' : overallNPS >= 0 ? 'Mixed' : 'At risk'} />
@@ -1098,17 +1039,11 @@ function Dashboard({ analytics, allResponses, onSelectResponse, onSelectPerson }
 
       {topThemes.length > 0 && (
         <div className="bg-white rounded-2xl p-6">
-          <div className="flex items-center gap-2 mb-1">
-            <Tag className="w-5 h-5 text-stone-600" />
-            <h3 className="font-serif text-xl text-stone-800">Themes Emerging</h3>
-          </div>
-          <p className="text-sm text-stone-500 mb-5">What people are actually talking about across submissions. Compounds over time.</p>
+          <div className="flex items-center gap-2 mb-1"><Tag className="w-5 h-5 text-stone-600" /><h3 className="font-serif text-xl text-stone-800">Themes Emerging</h3></div>
+          <p className="text-sm text-stone-500 mb-5">What people are actually talking about across submissions.</p>
           <div className="flex flex-wrap gap-2">
             {topThemes.map((t: any) => (
-              <div key={t.theme} className="px-3 py-1.5 bg-stone-100 rounded-full text-sm font-medium text-stone-700 flex items-center gap-1.5">
-                {t.theme}
-                <span className="text-xs text-stone-500">{t.count}{t.peopleCount > 1 ? ` · ${t.peopleCount} people` : ''}</span>
-              </div>
+              <div key={t.theme} className="px-3 py-1.5 bg-stone-100 rounded-full text-sm font-medium text-stone-700 flex items-center gap-1.5">{t.theme}<span className="text-xs text-stone-500">{t.count}{t.peopleCount > 1 ? ` · ${t.peopleCount} people` : ''}</span></div>
             ))}
           </div>
         </div>
@@ -1120,59 +1055,9 @@ function Dashboard({ analytics, allResponses, onSelectResponse, onSelectPerson }
         <div className="space-y-4">{dimStats.map((d: any) => <DimensionRow key={d.id} dim={d} />)}</div>
       </div>
 
-      {aiAnomalies.length > 0 && (
-        <div className="bg-white rounded-2xl p-6">
-          <div className="flex items-center gap-2 mb-1">
-            <Brain className="w-5 h-5 text-purple-600" />
-            <h3 className="font-serif text-xl text-stone-800">AI-Surfaced Anomalies</h3>
-          </div>
-          <p className="text-sm text-stone-500 mb-5">Patterns Claude flagged that don&apos;t match the surface answers. Worth a closer look.</p>
-          <div className="space-y-3">
-            {aiAnomalies.slice(0, 6).map((a: any, i: number) => (
-              <div key={i} className="border border-purple-200 bg-purple-50 rounded-xl p-4">
-                <div className="flex items-start gap-3">
-                  <Zap className="w-4 h-4 text-purple-600 mt-1 flex-shrink-0" />
-                  <div>
-                    <p className="font-medium text-stone-800 text-sm mb-1">{a.name} <span className="text-stone-500">· {a.type.replace(/_/g, ' ')}</span></p>
-                    <p className="text-sm text-stone-700">{a.description}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {detractorFlags.length > 0 && (
-        <div className="bg-white rounded-2xl p-6">
-          <div className="flex items-center gap-2 mb-1">
-            <AlertTriangle className="w-5 h-5 text-rose-500" />
-            <h3 className="font-serif text-xl text-stone-800">Signals Worth Reading</h3>
-          </div>
-          <p className="text-sm text-stone-500 mb-5">Detractor-level ratings (≤6) from latest submissions. The <em>why</em> behind the number.</p>
-          <div className="space-y-3">
-            {detractorFlags.slice(0, 8).map((f: any, i: number) => (
-              <div key={i} className="border border-rose-200 bg-rose-50 rounded-xl p-4">
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div>
-                    <p className="font-medium text-stone-800">{f.name} · <span className="text-stone-500">{f.dim}</span></p>
-                    <p className="text-sm text-stone-600 mt-0.5">{f.question}</p>
-                  </div>
-                  <span className="text-2xl font-serif text-rose-600 flex-shrink-0">{f.value}/10</span>
-                </div>
-                {f.comment ? (<p className="text-sm text-stone-700 mt-2 pl-3 border-l-2 border-rose-300 italic">&quot;{f.comment}&quot;</p>) : (<p className="text-xs text-stone-400 italic mt-2">No context provided.</p>)}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {trending.length > 0 && (
         <div className="bg-white rounded-2xl p-6">
-          <div className="flex items-center gap-2 mb-1">
-            <Activity className="w-5 h-5 text-stone-600" />
-            <h3 className="font-serif text-xl text-stone-800">Trajectories</h3>
-          </div>
+          <div className="flex items-center gap-2 mb-1"><Activity className="w-5 h-5 text-stone-600" /><h3 className="font-serif text-xl text-stone-800">Trajectories</h3></div>
           <p className="text-sm text-stone-500 mb-5">People with more than one submission. Their story over time.</p>
           <div className="space-y-2">
             {trending.map((t: any) => {
@@ -1181,16 +1066,10 @@ function Dashboard({ analytics, allResponses, onSelectResponse, onSelectPerson }
                 <button key={t.key} onClick={() => onSelectPerson(t.key)} className="w-full flex items-center justify-between p-4 rounded-xl hover:bg-stone-50 border border-stone-200 transition-all">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center text-white font-medium">{t.name.charAt(0).toUpperCase()}</div>
-                    <div className="text-left">
-                      <p className="font-medium text-stone-800">{t.name}</p>
-                      <p className="text-xs text-stone-500">{t.n} submissions</p>
-                    </div>
+                    <div className="text-left"><p className="font-medium text-stone-800">{t.name}</p><p className="text-xs text-stone-500">{t.n} submissions</p></div>
                   </div>
                   <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <p className="text-xs text-stone-500">{t.first.toFixed(1)} → {t.latest.toFixed(1)}</p>
-                      <p className={`text-sm font-medium ${t.delta > 0 ? 'text-emerald-600' : t.delta < 0 ? 'text-rose-600' : 'text-stone-500'}`}>{t.delta > 0 ? '+' : ''}{t.delta.toFixed(1)}</p>
-                    </div>
+                    <div className="text-right"><p className="text-xs text-stone-500">{t.first.toFixed(1)} → {t.latest.toFixed(1)}</p><p className={`text-sm font-medium ${t.delta > 0 ? 'text-emerald-600' : t.delta < 0 ? 'text-rose-600' : 'text-stone-500'}`}>{t.delta > 0 ? '+' : ''}{t.delta.toFixed(1)}</p></div>
                     {arrow}
                   </div>
                 </button>
@@ -1208,9 +1087,7 @@ function MetricCard({ label, value, suffix, tone, subtext }: any) {
   return (
     <div className="bg-white rounded-2xl p-6">
       <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider mb-2">{label}</p>
-      <p className={`text-4xl font-serif bg-gradient-to-br ${toneClass} bg-clip-text text-transparent`}>
-        {value}{suffix && <span className="text-xl text-stone-400">{suffix}</span>}
-      </p>
+      <p className={`text-4xl font-serif bg-gradient-to-br ${toneClass} bg-clip-text text-transparent`}>{value}{suffix && <span className="text-xl text-stone-400">{suffix}</span>}</p>
       <p className="text-sm text-stone-500 mt-1">{subtext}</p>
     </div>
   );
@@ -1226,9 +1103,7 @@ function InsightCard({ icon: Icon, color, title, subtitle, detail, metric, footn
   return (
     <div className={`${c.bg} ${c.border} border rounded-2xl p-5`}>
       <div className="flex items-start justify-between mb-3">
-        <div className={`${c.iconBg} w-10 h-10 rounded-xl flex items-center justify-center`}>
-          <Icon className={`w-5 h-5 ${c.iconColor}`} />
-        </div>
+        <div className={`${c.iconBg} w-10 h-10 rounded-xl flex items-center justify-center`}><Icon className={`w-5 h-5 ${c.iconColor}`} /></div>
         <span className={`text-xl font-serif ${c.metric}`}>{metric}</span>
       </div>
       <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider">{title}</p>
@@ -1249,10 +1124,7 @@ function DimensionRow({ dim }: any) {
   return (
     <div>
       <div className="flex justify-between items-baseline mb-2">
-        <div>
-          <span className="font-medium text-stone-800">{dim.dim}</span>
-          <span className="text-stone-500 text-sm ml-2">{dim.text}</span>
-        </div>
+        <div><span className="font-medium text-stone-800">{dim.dim}</span><span className="text-stone-500 text-sm ml-2">{dim.text}</span></div>
         <div className="flex items-center gap-3 flex-shrink-0">
           {dim.stdev > 1.5 && <span className="text-xs text-amber-600 font-medium">σ {dim.stdev.toFixed(1)}</span>}
           <span className="text-stone-500 text-xs">n={dim.n}</span>
@@ -1273,41 +1145,74 @@ function DimensionRow({ dim }: any) {
   );
 }
 
+function ResponseCard({ r, isSelected, toggleCompare, onSelect }: any) {
+  const [expanded, setExpanded] = useState(false);
+  const avg = r.ratingAvg;
+  const toneColor = avg !== null && avg !== undefined ? (avg >= 7 ? 'text-emerald-600' : avg >= 5 ? 'text-amber-600' : 'text-rose-600') : 'text-stone-400';
+  const hasAi = !!r.aiProcessedAt && !r.aiProcessingError;
+
+  return (
+    <div className={`bg-white border rounded-2xl transition-all ${isSelected ? 'border-amber-500 ring-2 ring-amber-200' : 'border-stone-200'}`}>
+      <div className="p-4 flex items-center gap-4">
+        <input type="checkbox" checked={isSelected} onChange={() => toggleCompare(r.id)} className="w-4 h-4 accent-amber-500 cursor-pointer" />
+        <button onClick={() => onSelect(r)} className="flex-1 flex items-center justify-between text-left">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center text-white font-medium">{(r.firstName || '?').charAt(0).toUpperCase()}</div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="font-medium text-stone-800">{r.firstName || 'Anonymous'}</p>
+                {r.aiEmotionalTone && <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">{r.aiEmotionalTone}</span>}
+                {r.aiSentimentOverall && <span className={`text-xs px-2 py-0.5 rounded-full ${SENTIMENT_COLOR[r.aiSentimentOverall] || 'bg-stone-100 text-stone-700'}`}>{r.aiSentimentOverall}</span>}
+              </div>
+              <p className="text-xs text-stone-500">{new Date(r.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · {new Date(r.submittedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}{r.durationSec && ` · ${Math.round(r.durationSec / 60)}m`}{r.deviceType && ` · ${r.deviceType}`}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="text-right"><p className="text-xs text-stone-500 uppercase tracking-wide">Avg</p><p className={`text-xl font-serif ${toneColor}`}>{avg !== null && avg !== undefined ? Number(avg).toFixed(1) : '—'}</p></div>
+            <ChevronRight className="w-5 h-5 text-stone-400" />
+          </div>
+        </button>
+      </div>
+      {hasAi && (
+        <>
+          <button onClick={() => setExpanded(!expanded)} className="w-full px-4 py-2.5 border-t border-stone-100 bg-stone-50 hover:bg-stone-100 flex items-center justify-between text-xs font-medium text-stone-600 rounded-b-2xl transition-all">
+            <span className="flex items-center gap-1.5"><Brain className="w-3.5 h-3.5 text-purple-600" /> AI summary</span>
+            {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {expanded && (
+            <div className="px-4 pb-4 pt-2 bg-stone-50 rounded-b-2xl space-y-3">
+              {r.aiSummary && <p className="text-sm text-stone-700 leading-relaxed">{r.aiSummary}</p>}
+              {r.aiKeySignals && r.aiKeySignals.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider mb-1.5">Key signals</p>
+                  <ul className="space-y-1">
+                    {r.aiKeySignals.map((s: string, i: number) => (
+                      <li key={i} className="text-sm text-stone-700 flex items-start gap-2"><span className="text-purple-600 font-bold flex-shrink-0">{i + 1}.</span><span>{s}</span></li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {r.aiThemes && r.aiThemes.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {r.aiThemes.map((t: string) => <span key={t} className="text-xs px-2 py-0.5 bg-stone-100 text-stone-700 rounded-full border border-stone-200">{t}</span>)}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function ResponseList({ responses, onSelect, compareIds, toggleCompare }: any) {
   if (!responses.length) return <div className="bg-white rounded-2xl p-16 text-center text-stone-500">No responses yet.</div>;
   return (
     <div className="space-y-3">
-      <p className="text-sm text-stone-500 mb-2">Tap checkbox to select up to 2 for side-by-side compare.</p>
-      {responses.map((r: any) => {
-        const avg = r.ratingAvg;
-        const isSelected = compareIds.includes(r.id);
-        const toneColor = avg !== null && avg !== undefined ? (avg >= 7 ? 'text-emerald-600' : avg >= 5 ? 'text-amber-600' : 'text-rose-600') : 'text-stone-400';
-        return (
-          <div key={r.id} className={`bg-white border rounded-2xl p-4 flex items-center gap-4 transition-all ${isSelected ? 'border-amber-500 ring-2 ring-amber-200' : 'border-stone-200'}`}>
-            <input type="checkbox" checked={isSelected} onChange={() => toggleCompare(r.id)} className="w-4 h-4 accent-amber-500 cursor-pointer" />
-            <button onClick={() => onSelect(r)} className="flex-1 flex items-center justify-between text-left">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center text-white font-medium">{(r.firstName || '?').charAt(0).toUpperCase()}</div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium text-stone-800">{r.firstName || 'Anonymous'}</p>
-                    {r.aiEmotionalTone && <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">{r.aiEmotionalTone}</span>}
-                    {r.aiSentimentOverall && <span className={`text-xs px-2 py-0.5 rounded-full ${SENTIMENT_COLOR[r.aiSentimentOverall] || 'bg-stone-100 text-stone-700'}`}>{r.aiSentimentOverall}</span>}
-                  </div>
-                  <p className="text-xs text-stone-500">{new Date(r.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · {new Date(r.submittedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}{r.durationSec && ` · ${Math.round(r.durationSec / 60)}m`}{r.deviceType && ` · ${r.deviceType}`}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <div className="text-right">
-                  <p className="text-xs text-stone-500 uppercase tracking-wide">Avg</p>
-                  <p className={`text-xl font-serif ${toneColor}`}>{avg !== null && avg !== undefined ? Number(avg).toFixed(1) : '—'}</p>
-                </div>
-                <ChevronRight className="w-5 h-5 text-stone-400" />
-              </div>
-            </button>
-          </div>
-        );
-      })}
+      <p className="text-sm text-stone-500 mb-2">Tap checkbox to select up to 2 for side-by-side compare. Click &ldquo;AI summary&rdquo; on any card to expand without leaving this view.</p>
+      {responses.map((r: any) => (
+        <ResponseCard key={r.id} r={r} isSelected={compareIds.includes(r.id)} toggleCompare={toggleCompare} onSelect={onSelect} />
+      ))}
     </div>
   );
 }
@@ -1327,18 +1232,12 @@ function PeopleView({ analytics, onSelectPerson }: any) {
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center text-white font-medium text-lg">{p.name.charAt(0).toUpperCase()}</div>
               <div>
-                <div className="flex items-center gap-2">
-                  <p className="font-medium text-stone-800 text-lg">{p.name}</p>
-                  {p.tone && <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">{p.tone}</span>}
-                </div>
+                <div className="flex items-center gap-2"><p className="font-medium text-stone-800 text-lg">{p.name}</p>{p.tone && <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">{p.tone}</span>}</div>
                 <p className="text-sm text-stone-500">{p.count} submission{p.count !== 1 ? 's' : ''} · last: {new Date(p.latestDate).toLocaleDateString()}</p>
               </div>
             </div>
             <div className="flex items-center gap-4">
-              <div className="text-right">
-                <p className="text-xs text-stone-500 uppercase tracking-wide">Latest</p>
-                <p className={`text-2xl font-serif ${toneColor}`}>{p.latest !== null && p.latest !== undefined ? Number(p.latest).toFixed(1) : '—'}</p>
-              </div>
+              <div className="text-right"><p className="text-xs text-stone-500 uppercase tracking-wide">Latest</p><p className={`text-2xl font-serif ${toneColor}`}>{p.latest !== null && p.latest !== undefined ? Number(p.latest).toFixed(1) : '—'}</p></div>
               <ChevronRight className="w-5 h-5 text-stone-400" />
             </div>
           </button>
@@ -1358,10 +1257,7 @@ function PersonView({ personKey, submissions, onBack, onSelectResponse }: any) {
       <div className="bg-white rounded-2xl p-8 mb-6">
         <div className="flex items-center gap-4 mb-6">
           <div className="w-16 h-16 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center text-white font-serif text-2xl">{name.charAt(0).toUpperCase()}</div>
-          <div>
-            <h2 className="text-3xl font-serif text-stone-800">{name}</h2>
-            <p className="text-stone-500">{submissions.length} submission{submissions.length !== 1 ? 's' : ''}</p>
-          </div>
+          <div><h2 className="text-3xl font-serif text-stone-800">{name}</h2><p className="text-stone-500">{submissions.length} submission{submissions.length !== 1 ? 's' : ''}</p></div>
         </div>
         {submissions.length > 1 ? (
           <div>
@@ -1399,12 +1295,8 @@ function PersonView({ personKey, submissions, onBack, onSelectResponse }: any) {
 
 function Trajectory({ dim }: any) {
   const validPoints = dim.points.filter((p: any) => typeof p.value === 'number');
-  if (validPoints.length < 2) {
-    return (<div className="flex items-center justify-between p-3 bg-stone-50 rounded-lg"><span className="text-sm text-stone-600">{dim.dim}</span><span className="text-sm text-stone-400 italic">Not enough data</span></div>);
-  }
-  const first = validPoints[0].value;
-  const last = validPoints[validPoints.length - 1].value;
-  const delta = last - first;
+  if (validPoints.length < 2) return (<div className="flex items-center justify-between p-3 bg-stone-50 rounded-lg"><span className="text-sm text-stone-600">{dim.dim}</span><span className="text-sm text-stone-400 italic">Not enough data</span></div>);
+  const first = validPoints[0].value; const last = validPoints[validPoints.length - 1].value; const delta = last - first;
   return (
     <div className="p-3 border border-stone-200 rounded-lg">
       <div className="flex items-center justify-between mb-2">
@@ -1436,36 +1328,24 @@ function ResponseDetail({ response, onBack, onDelete, onReprocess }: any) {
           <div>
             <h2 className="text-3xl font-serif text-stone-800">{response.firstName || 'Anonymous'}</h2>
             <p className="text-stone-500 text-sm mt-1">{new Date(response.submittedAt).toLocaleString()}{response.durationSec && ` · ${Math.round(response.durationSec / 60)}m ${response.durationSec % 60}s`}{response.deviceType && ` · ${response.deviceType}`}</p>
-            {response.totalEdits !== null && response.totalEdits !== undefined && response.totalEdits > 0 && (
-              <p className="text-stone-400 text-xs mt-1">{response.totalEdits} edit{response.totalEdits !== 1 ? 's' : ''}{response.ratingChanges > 0 && ` · ${response.ratingChanges} rating change${response.ratingChanges !== 1 ? 's' : ''}`}{response.skippedOpenCount > 0 && ` · ${response.skippedOpenCount} skipped`}</p>
-            )}
+            {response.totalEdits !== null && response.totalEdits !== undefined && response.totalEdits > 0 && (<p className="text-stone-400 text-xs mt-1">{response.totalEdits} edit{response.totalEdits !== 1 ? 's' : ''}{response.ratingChanges > 0 && ` · ${response.ratingChanges} rating change${response.ratingChanges !== 1 ? 's' : ''}`}{response.skippedOpenCount > 0 && ` · ${response.skippedOpenCount} skipped`}</p>)}
           </div>
           <div className="flex gap-2">
-            <button onClick={() => onReprocess(response.id)} className="text-purple-600 hover:text-purple-800 p-2" title="Re-run AI processing">
-              <Brain className="w-5 h-5" />
-            </button>
+            <button onClick={() => onReprocess(response.id)} className="text-purple-600 hover:text-purple-800 p-2" title="Re-run AI processing"><Brain className="w-5 h-5" /></button>
             <button onClick={() => onDelete(response.id)} className="text-red-500 hover:text-red-700 p-2" title="Delete"><Trash2 className="w-5 h-5" /></button>
           </div>
         </div>
 
         {response.aiProcessedAt && (
           <div className="mb-8">
-            <div className="flex items-center gap-2 mb-4">
-              <Brain className="w-5 h-5 text-purple-600" />
-              <h3 className="text-sm font-semibold text-stone-500 uppercase tracking-wide">AI Intelligence</h3>
-            </div>
+            <div className="flex items-center gap-2 mb-4"><Brain className="w-5 h-5 text-purple-600" /><h3 className="text-sm font-semibold text-stone-500 uppercase tracking-wide">AI Intelligence</h3></div>
             {response.aiProcessingError ? (
-              <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 text-sm text-rose-700">
-                AI processing failed: {response.aiProcessingError}
-              </div>
+              <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 text-sm text-rose-700">AI processing failed: {response.aiProcessingError}</div>
             ) : (
               <div className="space-y-4">
                 {response.aiSummary && (
                   <div className="bg-purple-50 border border-purple-200 rounded-xl p-5">
-                    <div className="flex items-start gap-2 mb-2">
-                      <Quote className="w-4 h-4 text-purple-600 mt-1 flex-shrink-0" />
-                      <p className="text-stone-700 leading-relaxed">{response.aiSummary}</p>
-                    </div>
+                    <div className="flex items-start gap-2 mb-2"><Quote className="w-4 h-4 text-purple-600 mt-1 flex-shrink-0" /><p className="text-stone-700 leading-relaxed">{response.aiSummary}</p></div>
                     <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-purple-200">
                       {response.aiEmotionalTone && <span className="text-xs px-2.5 py-1 bg-purple-100 text-purple-700 rounded-full font-medium">{response.aiEmotionalTone}</span>}
                       {response.aiSentimentOverall && <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${SENTIMENT_COLOR[response.aiSentimentOverall] || 'bg-stone-100 text-stone-700'}`}>{response.aiSentimentOverall}</span>}
@@ -1476,14 +1356,7 @@ function ResponseDetail({ response, onBack, onDelete, onReprocess }: any) {
                 {response.aiKeySignals && response.aiKeySignals.length > 0 && (
                   <div>
                     <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">Key Signals</p>
-                    <div className="space-y-2">
-                      {response.aiKeySignals.map((s: string, i: number) => (
-                        <div key={i} className="flex items-start gap-2 text-sm text-stone-700">
-                          <span className="text-purple-600 font-bold flex-shrink-0">{i + 1}.</span>
-                          <span>{s}</span>
-                        </div>
-                      ))}
-                    </div>
+                    <div className="space-y-2">{response.aiKeySignals.map((s: string, i: number) => (<div key={i} className="flex items-start gap-2 text-sm text-stone-700"><span className="text-purple-600 font-bold flex-shrink-0">{i + 1}.</span><span>{s}</span></div>))}</div>
                   </div>
                 )}
                 {response.aiAnomalyFlags && response.aiAnomalyFlags.length > 0 && (
@@ -1506,8 +1379,7 @@ function ResponseDetail({ response, onBack, onDelete, onReprocess }: any) {
 
         {!response.aiProcessedAt && (
           <div className="mb-8 bg-stone-50 border border-stone-200 rounded-xl p-4 text-sm text-stone-600 flex items-center gap-2">
-            <RefreshCw className="w-4 h-4" />
-            AI processing pending. Click the brain icon to run it now, or refresh in a few seconds.
+            <RefreshCw className="w-4 h-4" /> AI processing pending. Click the brain icon to run it now, or refresh in a few seconds.
           </div>
         )}
 
@@ -1515,29 +1387,14 @@ function ResponseDetail({ response, onBack, onDelete, onReprocess }: any) {
           <h3 className="text-sm font-semibold text-stone-500 uppercase tracking-wide mb-4">Ratings</h3>
           <div className="space-y-4">
             {RATING_QUESTIONS.map(q => {
-              const val = response.responses?.[q.id];
-              const comment = response.ratingComments?.[q.id];
-              const seg = scaleToSegment(val);
-              const sentiment = response.aiSentimentByQuestion?.[q.id];
+              const val = response.responses?.[q.id]; const comment = response.ratingComments?.[q.id]; const seg = scaleToSegment(val);
               return (
                 <div key={q.id} className="border border-stone-200 rounded-xl p-4">
                   <div className="flex items-start justify-between gap-4 mb-2">
-                    <div className="flex-1">
-                      <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">{q.dim}</span>
-                      <p className="text-stone-700 mt-1.5">{q.text}</p>
-                    </div>
-                    {val !== undefined && val !== null && seg && (
-                      <div className={`px-3 py-1 rounded-full text-sm font-semibold flex-shrink-0 ${SEGMENT_META[seg].bg} ${SEGMENT_META[seg].color}`}>{val}/10</div>
-                    )}
+                    <div className="flex-1"><span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">{q.dim}</span><p className="text-stone-700 mt-1.5">{q.text}</p></div>
+                    {val !== undefined && val !== null && seg && (<div className={`px-3 py-1 rounded-full text-sm font-semibold flex-shrink-0 ${SEGMENT_META[seg].bg} ${SEGMENT_META[seg].color}`}>{val}/10</div>)}
                   </div>
-                  {comment && (
-                    <div className="mt-3 pl-3 border-l-2 border-stone-300">
-                      <div className="flex items-start gap-2">
-                        <MessageSquare className="w-3.5 h-3.5 text-stone-400 mt-0.5 flex-shrink-0" />
-                        <p className="text-sm text-stone-600 italic whitespace-pre-wrap">{comment}</p>
-                      </div>
-                    </div>
-                  )}
+                  {comment && (<div className="mt-3 pl-3 border-l-2 border-stone-300"><div className="flex items-start gap-2"><MessageSquare className="w-3.5 h-3.5 text-stone-400 mt-0.5 flex-shrink-0" /><p className="text-sm text-stone-600 italic whitespace-pre-wrap">{comment}</p></div></div>)}
                 </div>
               );
             })}
@@ -1575,14 +1432,12 @@ function CompareView({ responses, onBack }: any) {
       <div className="bg-white rounded-2xl p-8">
         <h2 className="text-2xl font-serif text-stone-800 mb-6">Side-by-side</h2>
         <div className="grid grid-cols-2 gap-4 mb-6 pb-6 border-b border-stone-200">
-          <PersonCol response={a} />
-          <PersonCol response={b} />
+          <PersonCol response={a} /><PersonCol response={b} />
         </div>
         <h3 className="text-sm font-semibold text-stone-500 uppercase tracking-wide mb-4">Ratings</h3>
         <div className="space-y-3 mb-8">
           {RATING_QUESTIONS.map(q => {
-            const va = a.responses?.[q.id];
-            const vb = b.responses?.[q.id];
+            const va = a.responses?.[q.id]; const vb = b.responses?.[q.id];
             const diff = (typeof va === 'number' && typeof vb === 'number') ? va - vb : null;
             return (
               <div key={q.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-3 items-center py-2">
