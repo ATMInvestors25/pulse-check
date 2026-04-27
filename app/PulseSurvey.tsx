@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Heart, ChevronRight, ChevronLeft, Check, Lock, Download, Eye, EyeOff, Trash2, ArrowLeft, User, TrendingUp, TrendingDown, AlertTriangle, Users, Activity, Target, Sparkles, FileJson, FileSpreadsheet, Calendar, MessageSquare, Minus, RefreshCw, AlertCircle, X } from 'lucide-react';
+import { Heart, ChevronRight, ChevronLeft, Check, Lock, Eye, EyeOff, Trash2, ArrowLeft, User, TrendingUp, TrendingDown, AlertTriangle, Users, Activity, Target, Sparkles, FileJson, FileSpreadsheet, Calendar, MessageSquare, Minus, RefreshCw, AlertCircle, X } from 'lucide-react';
 
 // ====== SUPABASE CONFIG ======
 const SUPABASE_URL = 'https://lsrpjxnmasdnuepwdher.supabase.co';
@@ -47,11 +47,11 @@ const DRAFT_KEY = 'atm-survey-draft-v3';
 
 const sb = {
   async insert(row: any) {
-    const res = await fetch(\`\${SUPABASE_URL}/rest/v1/\${TABLE}\`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}`, {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
-        'Authorization': \`Bearer \${SUPABASE_KEY}\`,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
         'Content-Type': 'application/json',
         'Prefer': 'return=representation'
       },
@@ -59,28 +59,28 @@ const sb = {
     });
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(\`Insert failed (\${res.status}): \${text}\`);
+      throw new Error(`Insert failed (${res.status}): ${text}`);
     }
     return res.json();
   },
   async selectAll() {
-    const res = await fetch(\`\${SUPABASE_URL}/rest/v1/\${TABLE}?select=*&order=submitted_at.desc\`, {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': \`Bearer \${SUPABASE_KEY}\` }
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?select=*&order=submitted_at.desc`, {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
     });
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(\`Select failed (\${res.status}): \${text}\`);
+      throw new Error(`Select failed (${res.status}): ${text}`);
     }
     return res.json();
   },
   async delete(id: string) {
-    const res = await fetch(\`\${SUPABASE_URL}/rest/v1/\${TABLE}?id=eq.\${id}\`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?id=eq.${id}`, {
       method: 'DELETE',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': \`Bearer \${SUPABASE_KEY}\` }
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
     });
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(\`Delete failed (\${res.status}): \${text}\`);
+      throw new Error(`Delete failed (${res.status}): ${text}`);
     }
     return true;
   }
@@ -124,7 +124,7 @@ function Toast({ kind, message, onClose }: any) {
     : 'bg-emerald-50 border-emerald-300 text-emerald-800';
   const Icon = kind === 'error' ? AlertCircle : Check;
   return (
-    <div className={\`fixed top-4 right-4 z-50 \${colors} border rounded-xl shadow-lg p-4 max-w-md flex items-start gap-3\`}>
+    <div className={`fixed top-4 right-4 z-50 ${colors} border rounded-xl shadow-lg p-4 max-w-md flex items-start gap-3`}>
       <Icon className="w-5 h-5 mt-0.5 flex-shrink-0" />
       <p className="text-sm flex-1 leading-snug">{message}</p>
       <button onClick={onClose} className="flex-shrink-0 hover:opacity-70">
@@ -225,6 +225,7 @@ export default function PulseSurvey() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, step, responses]);
 
   const updateResponse = (id: string, value: any) => setResponses(prev => ({ ...prev, [id]: value }));
@@ -258,7 +259,7 @@ export default function PulseSurvey() {
       setMode('complete');
     } catch (e: any) {
       console.error(e);
-      setToast({ kind: 'error', message: \`Submission failed: \${e.message}. Please try again or screenshot your answers.\` });
+      setToast({ kind: 'error', message: `Submission failed: ${e.message}. Please try again or screenshot your answers.` });
     } finally {
       setSubmitting(false);
     }
@@ -288,7 +289,7 @@ export default function PulseSurvey() {
       setAllResponses(rows.map(adaptRow));
     } catch (e: any) {
       console.error(e);
-      setToast({ kind: 'error', message: \`Could not load responses: \${e.message}\` });
+      setToast({ kind: 'error', message: `Could not load responses: ${e.message}` });
       setAllResponses([]);
     } finally {
       setLoadingResponses(false);
@@ -298,22 +299,22 @@ export default function PulseSurvey() {
   const exportCSV = () => {
     if (!allResponses.length) return;
     const headers = ['Name', 'Submitted At', 'Duration (sec)',
-      ...RATING_QUESTIONS.map(q => \`\${q.dim}: Rating\`),
-      ...RATING_QUESTIONS.map(q => \`\${q.dim}: Why\`),
+      ...RATING_QUESTIONS.map(q => `${q.dim}: Rating`),
+      ...RATING_QUESTIONS.map(q => `${q.dim}: Why`),
       ...OPEN_QUESTIONS.map(q => q.text)];
     const rows = allResponses.map(r => {
       const row: any[] = [r.firstName || '', new Date(r.submittedAt).toLocaleString(), r.durationSec ?? ''];
       RATING_QUESTIONS.forEach(q => row.push(r.responses?.[q.id] ?? ''));
       RATING_QUESTIONS.forEach(q => row.push((r.ratingComments?.[q.id] || '').replace(/"/g, '""')));
       OPEN_QUESTIONS.forEach(q => row.push((r.responses?.[q.id] || '').replace(/"/g, '""')));
-      return row.map(c => \`"\${c}"\`).join(',');
+      return row.map(c => `"${c}"`).join(',');
     });
-    const csv = [headers.map(h => \`"\${h}"\`).join(','), ...rows].join('\\n');
+    const csv = [headers.map(h => `"${h}"`).join(','), ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = \`atm-pulse-\${new Date().toISOString().split('T')[0]}.csv\`;
+    a.download = `atm-pulse-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -324,7 +325,7 @@ export default function PulseSurvey() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = \`atm-pulse-\${new Date().toISOString().split('T')[0]}.json\`;
+    a.download = `atm-pulse-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -341,7 +342,7 @@ export default function PulseSurvey() {
           if (selectedResponse?.id === id) { setSelectedResponse(null); setAdminView('list'); }
           setToast({ kind: 'success', message: 'Response deleted.' });
         } catch (e: any) {
-          setToast({ kind: 'error', message: \`Delete failed: \${e.message}\` });
+          setToast({ kind: 'error', message: `Delete failed: ${e.message}` });
         }
       }
     });
@@ -572,7 +573,7 @@ export default function PulseSurvey() {
               const seg = scaleToSegment(n);
               const segColor = seg === 'promoter' ? 'from-emerald-400 to-emerald-600' : seg === 'passive' ? 'from-amber-400 to-amber-600' : 'from-rose-400 to-rose-600';
               return (
-                <button key={n} onClick={() => updateResponse(q.id, n)} className={\`aspect-square rounded-xl flex items-center justify-center text-base md:text-lg font-medium transition-all \${isSelected ? \`bg-gradient-to-br \${segColor} text-white shadow-lg scale-110\` : 'bg-stone-100 hover:bg-stone-200 text-stone-700'}\`}>{n}</button>
+                <button key={n} onClick={() => updateResponse(q.id, n)} className={`aspect-square rounded-xl flex items-center justify-center text-base md:text-lg font-medium transition-all ${isSelected ? `bg-gradient-to-br ${segColor} text-white shadow-lg scale-110` : 'bg-stone-100 hover:bg-stone-200 text-stone-700'}`}>{n}</button>
               );
             })}
           </div>
@@ -580,10 +581,10 @@ export default function PulseSurvey() {
             <span>Not at all</span><span>Absolutely</span>
           </div>
           {val !== undefined && val !== null && segment && (
-            <div className={\`rounded-2xl border p-4 mb-4 transition-all \${SEGMENT_META[segment].bg} \${SEGMENT_META[segment].border}\`}>
+            <div className={`rounded-2xl border p-4 mb-4 transition-all ${SEGMENT_META[segment].bg} ${SEGMENT_META[segment].border}`}>
               <div className="flex items-center gap-2 mb-2">
-                <div className={\`w-2 h-2 rounded-full \${SEGMENT_META[segment].dot}\`}></div>
-                <span className={\`text-sm font-semibold \${SEGMENT_META[segment].color}\`}>{SEGMENT_META[segment].label}</span>
+                <div className={`w-2 h-2 rounded-full ${SEGMENT_META[segment].dot}`}></div>
+                <span className={`text-sm font-semibold ${SEGMENT_META[segment].color}`}>{SEGMENT_META[segment].label}</span>
               </div>
               <label className="block text-sm text-stone-600 mb-2">What&apos;s the story behind that number? <span className="text-stone-400">(optional, but this is where the gold is)</span></label>
               <textarea value={comment} onChange={(e) => updateRatingComment(q.id, e.target.value)} placeholder="A sentence or two about why..." rows={3} className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent text-stone-700 text-sm resize-none" />
@@ -627,7 +628,7 @@ export default function PulseSurvey() {
                     <div className="flex justify-between items-center gap-3">
                       <span className="text-stone-700 text-sm flex-1"><span className="text-stone-400">{q.dim} · </span>{q.text}</span>
                       {val !== undefined && val !== null && seg ? (
-                        <span className={\`font-medium flex-shrink-0 px-2 py-0.5 rounded-full text-xs \${SEGMENT_META[seg].bg} \${SEGMENT_META[seg].color}\`}>{val}/10</span>
+                        <span className={`font-medium flex-shrink-0 px-2 py-0.5 rounded-full text-xs ${SEGMENT_META[seg].bg} ${SEGMENT_META[seg].color}`}>{val}/10</span>
                       ) : <em className="text-stone-400 text-sm">skipped</em>}
                     </div>
                     {ratingComments[q.id] && (<p className="text-xs text-stone-500 mt-1 pl-3 border-l-2 border-stone-200 italic">{ratingComments[q.id]}</p>)}
@@ -659,7 +660,7 @@ export default function PulseSurvey() {
         <div className="max-w-2xl mx-auto">
           <div className="mb-8">
             <div className="h-1.5 bg-stone-200 rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-amber-500 to-orange-600 transition-all duration-500" style={{ width: \`\${progress}%\` }} />
+              <div className="h-full bg-gradient-to-r from-amber-500 to-orange-600 transition-all duration-500" style={{ width: `${progress}%` }} />
             </div>
           </div>
           <div className="bg-white rounded-3xl shadow-xl p-8 md:p-12 min-h-[480px] flex flex-col">
@@ -688,7 +689,7 @@ export default function PulseSurvey() {
 
 function AdminShell({ analytics, allResponses, loading, adminView, setAdminView, selectedResponse, setSelectedResponse, selectedPerson, setSelectedPerson, compareIds, toggleCompare, exportCSV, exportJSON, deleteResponse, setMode, refresh }: any) {
   const TabBtn = ({ id, children, icon: Icon }: any) => (
-    <button onClick={() => setAdminView(id)} className={\`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-2 \${adminView === id ? 'bg-stone-800 text-white' : 'text-stone-600 hover:bg-stone-200'}\`}>
+    <button onClick={() => setAdminView(id)} className={`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-2 ${adminView === id ? 'bg-stone-800 text-white' : 'text-stone-600 hover:bg-stone-200'}`}>
       {Icon && <Icon className="w-4 h-4" />}{children}
     </button>
   );
@@ -702,7 +703,7 @@ function AdminShell({ analytics, allResponses, loading, adminView, setAdminView,
           </div>
           <div className="flex gap-2 items-center">
             <button onClick={refresh} disabled={loading} className="bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-40 text-stone-700 px-3 py-2 rounded-lg flex items-center gap-1.5 text-sm font-medium">
-              <RefreshCw className={\`w-4 h-4 \${loading ? 'animate-spin' : ''}\`} /> Refresh
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
             </button>
             <button onClick={exportCSV} disabled={!allResponses.length} className="bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-40 text-stone-700 px-3 py-2 rounded-lg flex items-center gap-1.5 text-sm font-medium">
               <FileSpreadsheet className="w-4 h-4" /> CSV
@@ -752,14 +753,14 @@ function Dashboard({ analytics, allResponses, onSelectPerson }: any) {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <MetricCard label="Team Pulse" value={overallMean !== null ? overallMean.toFixed(1) : '—'} suffix="/ 10" tone={overallMean >= 7 ? 'good' : overallMean >= 5 ? 'neutral' : 'bad'} subtext={\`Avg across \${uniquePeople} \${uniquePeople === 1 ? 'person' : 'people'}\`} />
-        <MetricCard label="eNPS" value={overallNPS !== null ? (overallNPS > 0 ? \`+\${overallNPS}\` : \`\${overallNPS}\`) : '—'} tone={overallNPS >= 30 ? 'good' : overallNPS >= 0 ? 'neutral' : 'bad'} subtext={overallNPS >= 30 ? 'Strong' : overallNPS >= 0 ? 'Mixed' : 'At risk'} />
-        <MetricCard label="Submissions" value={totalSubmissions} tone="neutral" subtext={trending.length > 0 ? \`\${trending.length} with trend data\` : 'First wave'} />
+        <MetricCard label="Team Pulse" value={overallMean !== null ? overallMean.toFixed(1) : '—'} suffix="/ 10" tone={overallMean >= 7 ? 'good' : overallMean >= 5 ? 'neutral' : 'bad'} subtext={`Avg across ${uniquePeople} ${uniquePeople === 1 ? 'person' : 'people'}`} />
+        <MetricCard label="eNPS" value={overallNPS !== null ? (overallNPS > 0 ? `+${overallNPS}` : `${overallNPS}`) : '—'} tone={overallNPS >= 30 ? 'good' : overallNPS >= 0 ? 'neutral' : 'bad'} subtext={overallNPS >= 30 ? 'Strong' : overallNPS >= 0 ? 'Mixed' : 'At risk'} />
+        <MetricCard label="Submissions" value={totalSubmissions} tone="neutral" subtext={trending.length > 0 ? `${trending.length} with trend data` : 'First wave'} />
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {constraint && <InsightCard icon={Target} color="rose" title="The Constraint" subtitle={constraint.dim} detail={constraint.text} metric={\`\${constraint.mean.toFixed(1)}/10\`} footnote="Lowest-scoring dimension. Fix this first." />}
-        {highestVariance && highestVariance.stdev > 1 && <InsightCard icon={AlertTriangle} color="amber" title="Most Divided" subtitle={highestVariance.dim} detail={highestVariance.text} metric={\`σ \${highestVariance.stdev.toFixed(1)}\`} footnote="Highest disagreement. Worth a conversation." />}
-        {strongest && <InsightCard icon={Sparkles} color="emerald" title="The Strength" subtitle={strongest.dim} detail={strongest.text} metric={\`\${strongest.mean.toFixed(1)}/10\`} footnote="Your highest score. Protect it." />}
+        {constraint && <InsightCard icon={Target} color="rose" title="The Constraint" subtitle={constraint.dim} detail={constraint.text} metric={`${constraint.mean.toFixed(1)}/10`} footnote="Lowest-scoring dimension. Fix this first." />}
+        {highestVariance && highestVariance.stdev > 1 && <InsightCard icon={AlertTriangle} color="amber" title="Most Divided" subtitle={highestVariance.dim} detail={highestVariance.text} metric={`σ ${highestVariance.stdev.toFixed(1)}`} footnote="Highest disagreement. Worth a conversation." />}
+        {strongest && <InsightCard icon={Sparkles} color="emerald" title="The Strength" subtitle={strongest.dim} detail={strongest.text} metric={`${strongest.mean.toFixed(1)}/10`} footnote="Your highest score. Protect it." />}
       </div>
       <div className="bg-white rounded-2xl p-6">
         <h3 className="font-serif text-xl text-stone-800 mb-1">Dimension Breakdown</h3>
@@ -811,7 +812,7 @@ function Dashboard({ analytics, allResponses, onSelectPerson }: any) {
                   <div className="flex items-center gap-4">
                     <div className="text-right">
                       <p className="text-xs text-stone-500">{t.first.toFixed(1)} → {t.latest.toFixed(1)}</p>
-                      <p className={\`text-sm font-medium \${t.delta > 0 ? 'text-emerald-600' : t.delta < 0 ? 'text-rose-600' : 'text-stone-500'}\`}>{t.delta > 0 ? '+' : ''}{t.delta.toFixed(1)}</p>
+                      <p className={`text-sm font-medium ${t.delta > 0 ? 'text-emerald-600' : t.delta < 0 ? 'text-rose-600' : 'text-stone-500'}`}>{t.delta > 0 ? '+' : ''}{t.delta.toFixed(1)}</p>
                     </div>
                     {arrow}
                   </div>
@@ -830,7 +831,7 @@ function MetricCard({ label, value, suffix, tone, subtext }: any) {
   return (
     <div className="bg-white rounded-2xl p-6">
       <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider mb-2">{label}</p>
-      <p className={\`text-4xl font-serif bg-gradient-to-br \${toneClass} bg-clip-text text-transparent\`}>
+      <p className={`text-4xl font-serif bg-gradient-to-br ${toneClass} bg-clip-text text-transparent`}>
         {value}{suffix && <span className="text-xl text-stone-400">{suffix}</span>}
       </p>
       <p className="text-sm text-stone-500 mt-1">{subtext}</p>
@@ -846,12 +847,12 @@ function InsightCard({ icon: Icon, color, title, subtitle, detail, metric, footn
   };
   const c = colors[color];
   return (
-    <div className={\`\${c.bg} \${c.border} border rounded-2xl p-5\`}>
+    <div className={`${c.bg} ${c.border} border rounded-2xl p-5`}>
       <div className="flex items-start justify-between mb-3">
-        <div className={\`\${c.iconBg} w-10 h-10 rounded-xl flex items-center justify-center\`}>
-          <Icon className={\`w-5 h-5 \${c.iconColor}\`} />
+        <div className={`${c.iconBg} w-10 h-10 rounded-xl flex items-center justify-center`}>
+          <Icon className={`w-5 h-5 ${c.iconColor}`} />
         </div>
-        <span className={\`text-xl font-serif \${c.metric}\`}>{metric}</span>
+        <span className={`text-xl font-serif ${c.metric}`}>{metric}</span>
       </div>
       <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider">{title}</p>
       <p className="text-lg font-medium text-stone-800 mt-1">{subtitle}</p>
@@ -882,13 +883,13 @@ function DimensionRow({ dim }: any) {
         </div>
       </div>
       <div className="h-2.5 bg-stone-100 rounded-full overflow-hidden mb-1.5">
-        <div className={\`h-full bg-gradient-to-r \${barColor} rounded-full transition-all\`} style={{ width: \`\${widthPct}%\` }} />
+        <div className={`h-full bg-gradient-to-r ${barColor} rounded-full transition-all`} style={{ width: `${widthPct}%` }} />
       </div>
       {total > 0 && (
         <div className="flex gap-0.5 h-1.5">
-          {detractors > 0 && <div className="bg-rose-400 rounded-full" style={{ width: \`\${(detractors/total)*100}%\` }} />}
-          {passives > 0 && <div className="bg-amber-400 rounded-full" style={{ width: \`\${(passives/total)*100}%\` }} />}
-          {promoters > 0 && <div className="bg-emerald-400 rounded-full" style={{ width: \`\${(promoters/total)*100}%\` }} />}
+          {detractors > 0 && <div className="bg-rose-400 rounded-full" style={{ width: `${(detractors/total)*100}%` }} />}
+          {passives > 0 && <div className="bg-amber-400 rounded-full" style={{ width: `${(passives/total)*100}%` }} />}
+          {promoters > 0 && <div className="bg-emerald-400 rounded-full" style={{ width: `${(promoters/total)*100}%` }} />}
         </div>
       )}
     </div>
@@ -906,20 +907,20 @@ function ResponseList({ responses, onSelect, compareIds, toggleCompare }: any) {
         const isSelected = compareIds.includes(r.id);
         const toneColor = avg !== null ? (avg >= 7 ? 'text-emerald-600' : avg >= 5 ? 'text-amber-600' : 'text-rose-600') : 'text-stone-400';
         return (
-          <div key={r.id} className={\`bg-white border rounded-2xl p-4 flex items-center gap-4 transition-all \${isSelected ? 'border-amber-500 ring-2 ring-amber-200' : 'border-stone-200'}\`}>
+          <div key={r.id} className={`bg-white border rounded-2xl p-4 flex items-center gap-4 transition-all ${isSelected ? 'border-amber-500 ring-2 ring-amber-200' : 'border-stone-200'}`}>
             <input type="checkbox" checked={isSelected} onChange={() => toggleCompare(r.id)} className="w-4 h-4 accent-amber-500 cursor-pointer" />
             <button onClick={() => onSelect(r)} className="flex-1 flex items-center justify-between text-left">
               <div className="flex items-center gap-3">
                 <div className="w-11 h-11 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center text-white font-medium">{(r.firstName || '?').charAt(0).toUpperCase()}</div>
                 <div>
                   <p className="font-medium text-stone-800">{r.firstName || 'Anonymous'}</p>
-                  <p className="text-xs text-stone-500">{new Date(r.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · {new Date(r.submittedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}{r.durationSec && \` · \${Math.round(r.durationSec / 60)}m\`}</p>
+                  <p className="text-xs text-stone-500">{new Date(r.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · {new Date(r.submittedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}{r.durationSec && ` · ${Math.round(r.durationSec / 60)}m`}</p>
                 </div>
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-right">
                   <p className="text-xs text-stone-500 uppercase tracking-wide">Avg</p>
-                  <p className={\`text-xl font-serif \${toneColor}\`}>{avg !== null ? avg.toFixed(1) : '—'}</p>
+                  <p className={`text-xl font-serif ${toneColor}`}>{avg !== null ? avg.toFixed(1) : '—'}</p>
                 </div>
                 <ChevronRight className="w-5 h-5 text-stone-400" />
               </div>
@@ -954,7 +955,7 @@ function PeopleView({ analytics, onSelectPerson }: any) {
             <div className="flex items-center gap-4">
               <div className="text-right">
                 <p className="text-xs text-stone-500 uppercase tracking-wide">Latest</p>
-                <p className={\`text-2xl font-serif \${toneColor}\`}>{p.latest !== null ? p.latest.toFixed(1) : '—'}</p>
+                <p className={`text-2xl font-serif ${toneColor}`}>{p.latest !== null ? p.latest.toFixed(1) : '—'}</p>
               </div>
               <ChevronRight className="w-5 h-5 text-stone-400" />
             </div>
@@ -1029,7 +1030,7 @@ function Trajectory({ dim }: any) {
         <span className="text-sm font-medium text-stone-700">{dim.dim}</span>
         <div className="flex items-center gap-2 text-sm">
           <span className="text-stone-500">{first} → {last}</span>
-          <span className={\`font-medium \${delta > 0 ? 'text-emerald-600' : delta < 0 ? 'text-rose-600' : 'text-stone-500'}\`}>{delta > 0 ? '+' : ''}{delta}</span>
+          <span className={`font-medium ${delta > 0 ? 'text-emerald-600' : delta < 0 ? 'text-rose-600' : 'text-stone-500'}`}>{delta > 0 ? '+' : ''}{delta}</span>
         </div>
       </div>
       <div className="relative h-8 flex items-center">
@@ -1038,7 +1039,7 @@ function Trajectory({ dim }: any) {
           const leftPct = validPoints.length > 1 ? (i / (validPoints.length - 1)) * 100 : 50;
           const topPct = 100 - (p.value / 10) * 100;
           const color = p.value >= 7 ? 'bg-emerald-500' : p.value >= 5 ? 'bg-amber-500' : 'bg-rose-500';
-          return <div key={p.id} className={\`absolute w-2.5 h-2.5 \${color} rounded-full border-2 border-white shadow\`} style={{ left: \`\${leftPct}%\`, top: \`\${topPct}%\`, transform: 'translate(-50%, -50%)' }} title={\`\${new Date(p.date).toLocaleDateString()}: \${p.value}\`} />;
+          return <div key={p.id} className={`absolute w-2.5 h-2.5 ${color} rounded-full border-2 border-white shadow`} style={{ left: `${leftPct}%`, top: `${topPct}%`, transform: 'translate(-50%, -50%)' }} title={`${new Date(p.date).toLocaleDateString()}: ${p.value}`} />;
         })}
       </div>
     </div>
@@ -1053,7 +1054,7 @@ function ResponseDetail({ response, onBack, onDelete }: any) {
         <div className="flex justify-between items-start mb-6 pb-6 border-b border-stone-200">
           <div>
             <h2 className="text-3xl font-serif text-stone-800">{response.firstName || 'Anonymous'}</h2>
-            <p className="text-stone-500 text-sm mt-1">{new Date(response.submittedAt).toLocaleString()}{response.durationSec && \` · Completed in \${Math.round(response.durationSec / 60)}m \${response.durationSec % 60}s\`}</p>
+            <p className="text-stone-500 text-sm mt-1">{new Date(response.submittedAt).toLocaleString()}{response.durationSec && ` · Completed in ${Math.round(response.durationSec / 60)}m ${response.durationSec % 60}s`}</p>
           </div>
           <button onClick={() => onDelete(response.id)} className="text-red-500 hover:text-red-700 p-2" title="Delete"><Trash2 className="w-5 h-5" /></button>
         </div>
@@ -1072,7 +1073,7 @@ function ResponseDetail({ response, onBack, onDelete }: any) {
                       <p className="text-stone-700 mt-1.5">{q.text}</p>
                     </div>
                     {val !== undefined && val !== null && seg && (
-                      <div className={\`px-3 py-1 rounded-full text-sm font-semibold flex-shrink-0 \${SEGMENT_META[seg].bg} \${SEGMENT_META[seg].color}\`}>{val}/10</div>
+                      <div className={`px-3 py-1 rounded-full text-sm font-semibold flex-shrink-0 ${SEGMENT_META[seg].bg} ${SEGMENT_META[seg].color}`}>{val}/10</div>
                     )}
                   </div>
                   {comment && (
@@ -1127,7 +1128,7 @@ function CompareView({ responses, onBack }: any) {
                 <span className="text-sm text-stone-700"><span className="text-stone-400">{q.dim} · </span>{q.text}</span>
                 <span className="text-base font-medium text-stone-800 w-12 text-right">{va ?? '—'}</span>
                 <span className="text-base font-medium text-stone-800 w-12 text-right">{vb ?? '—'}</span>
-                <span className={\`text-sm font-medium w-12 text-right \${diff !== null && diff > 0 ? 'text-emerald-600' : diff !== null && diff < 0 ? 'text-rose-600' : 'text-stone-400'}\`}>{diff === null ? '—' : diff > 0 ? \`+\${diff}\` : diff}</span>
+                <span className={`text-sm font-medium w-12 text-right ${diff !== null && diff > 0 ? 'text-emerald-600' : diff !== null && diff < 0 ? 'text-rose-600' : 'text-stone-400'}`}>{diff === null ? '—' : diff > 0 ? `+${diff}` : diff}</span>
               </div>
             );
           })}
