@@ -1,12 +1,17 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { Heart, ChevronRight, ChevronLeft, Check, Lock, Eye, EyeOff, Trash2, ArrowLeft, User, TrendingUp, TrendingDown, AlertTriangle, Users, Activity, Target, Sparkles, FileJson, FileSpreadsheet, Calendar, MessageSquare, Minus, RefreshCw, AlertCircle, X } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Heart, ChevronRight, ChevronLeft, Check, Lock, Eye, EyeOff, Trash2, ArrowLeft, User, TrendingUp, TrendingDown, AlertTriangle, Users, Activity, Target, Sparkles, FileJson, FileSpreadsheet, Calendar, MessageSquare, Minus, RefreshCw, AlertCircle, X, Brain, Zap, Tag, Quote } from 'lucide-react';
 
 // ====== SUPABASE CONFIG ======
 const SUPABASE_URL = 'https://lsrpjxnmasdnuepwdher.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_3F53NrwMUxshvlFaQ2yVvg_KJgBRY23';
 const TABLE = 'atm_pulse_responses';
+const EVENTS_TABLE = 'atm_pulse_question_events';
+const PROCESS_FN = `${SUPABASE_URL}/functions/v1/atm-pulse-process`;
+
+// ====== SURVEY VERSION ======
+const SURVEY_VERSION = 'v2.0';
 
 // ====== ADMIN PASSCODE ======
 const ADMIN_PASSCODE = 'SHANKS2026';
@@ -43,8 +48,17 @@ const SEGMENT_META: Record<string, any> = {
   detractor: { label: 'Detractor', color: 'text-rose-700', bg: 'bg-rose-50', border: 'border-rose-200', dot: 'bg-rose-500' }
 };
 
+const SENTIMENT_COLOR: Record<string, string> = {
+  positive: 'bg-emerald-100 text-emerald-700',
+  neutral: 'bg-stone-100 text-stone-700',
+  mixed: 'bg-amber-100 text-amber-700',
+  concerned: 'bg-orange-100 text-orange-700',
+  negative: 'bg-rose-100 text-rose-700'
+};
+
 const DRAFT_KEY = 'atm-survey-draft-v3';
 
+// ==================== SUPABASE CLIENT ====================
 const sb = {
   async insert(row: any) {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}`, {
@@ -60,6 +74,24 @@ const sb = {
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`Insert failed (${res.status}): ${text}`);
+    }
+    return res.json();
+  },
+  async insertEvents(events: any[]) {
+    if (!events.length) return [];
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${EVENTS_TABLE}`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify(events)
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Events insert failed (${res.status}): ${text}`);
     }
     return res.json();
   },
@@ -83,9 +115,18 @@ const sb = {
       throw new Error(`Delete failed (${res.status}): ${text}`);
     }
     return true;
+  },
+  triggerProcessing(responseId: string) {
+    // Fire and forget — don't block UI on AI processing
+    fetch(PROCESS_FN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ response_id: responseId })
+    }).catch(e => console.warn('AI processing trigger failed:', e));
   }
 };
 
+// ==================== UTILS ====================
 const mean = (arr: number[]) => arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
 const variance = (arr: number[]) => {
   if (arr.length < 2) return 0;
@@ -101,6 +142,17 @@ const computeNPS = (vals: number[]) => {
   return Math.round(((promoters - detractors) / valid.length) * 100);
 };
 
+const wordCount = (s: string) => s ? s.trim().split(/\s+/).filter(Boolean).length : 0;
+const charCount = (s: string) => s ? s.length : 0;
+
+const detectDeviceType = (): string => {
+  if (typeof window === 'undefined') return 'unknown';
+  const ua = navigator.userAgent;
+  if (/Mobi|Android/i.test(ua)) return 'mobile';
+  if (/Tablet|iPad/i.test(ua)) return 'tablet';
+  return 'desktop';
+};
+
 const adaptRow = (r: any) => ({
   id: r.id,
   firstName: r.first_name,
@@ -109,9 +161,34 @@ const adaptRow = (r: any) => ({
   submittedAt: r.submitted_at,
   durationSec: r.duration_sec,
   responses: r.responses || {},
-  ratingComments: r.rating_comments || {}
+  ratingComments: r.rating_comments || {},
+  // V2 fields
+  surveyVersion: r.survey_version,
+  waveId: r.wave_id,
+  deviceType: r.device_type,
+  totalEdits: r.total_edits,
+  ratingChanges: r.rating_changes,
+  skippedOpenCount: r.skipped_open_count,
+  hesitationScore: r.hesitation_score,
+  ratingAvg: r.rating_avg,
+  ratingMin: r.rating_min,
+  ratingMax: r.rating_max,
+  ratingStdev: r.rating_stdev,
+  npsClassification: r.nps_classification,
+  totalWordCount: r.total_word_count,
+  // AI fields
+  aiProcessedAt: r.ai_processed_at,
+  aiSummary: r.ai_summary,
+  aiThemes: r.ai_themes || [],
+  aiSentimentOverall: r.ai_sentiment_overall,
+  aiSentimentByQuestion: r.ai_sentiment_by_question || {},
+  aiAnomalyFlags: r.ai_anomaly_flags || [],
+  aiEmotionalTone: r.ai_emotional_tone,
+  aiKeySignals: r.ai_key_signals || [],
+  aiProcessingError: r.ai_processing_error
 });
 
+// ==================== TOAST ====================
 function Toast({ kind, message, onClose }: any) {
   useEffect(() => {
     if (kind === 'success') {
@@ -150,6 +227,19 @@ function ConfirmDialog({ open, title, message, onConfirm, onCancel }: any) {
   );
 }
 
+// ==================== BEHAVIORAL TRACKING TYPES ====================
+interface QuestionEvent {
+  question_id: string;
+  question_type: 'rating' | 'open' | 'rating_comment';
+  time_on_question_ms: number;
+  edit_count: number;
+  value_changes: { from: any; to: any; at: number }[];
+  final_value: string;
+  word_count: number;
+  char_count: number;
+  was_skipped: boolean;
+}
+
 export default function PulseSurvey() {
   const [mode, setMode] = useState('welcome');
   const [step, setStep] = useState(0);
@@ -170,6 +260,11 @@ export default function PulseSurvey() {
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState<any>(null);
   const [confirmDialog, setConfirmDialog] = useState<any>(null);
+
+  // Behavioral tracking refs (no rerender on update)
+  const questionEventsRef = useRef<Record<string, QuestionEvent>>({});
+  const stepStartTimeRef = useRef<number>(Date.now());
+  const previousStepRef = useRef<number>(0);
 
   useEffect(() => {
     try {
@@ -197,6 +292,71 @@ export default function PulseSurvey() {
     if (step >= 1 && step <= 6) return responses[RATING_QUESTIONS[step - 1].id] !== undefined && responses[RATING_QUESTIONS[step - 1].id] !== null;
     return true;
   }
+
+  // Track time per question — when leaving a step, record duration
+  useEffect(() => {
+    if (mode !== 'survey') return;
+    const prevStep = previousStepRef.current;
+    const elapsed = Date.now() - stepStartTimeRef.current;
+
+    // Was leaving a rating question (1-6)
+    if (prevStep >= 1 && prevStep <= 6) {
+      const q = RATING_QUESTIONS[prevStep - 1];
+      const existing = questionEventsRef.current[q.id];
+      const val = responses[q.id];
+      questionEventsRef.current[q.id] = {
+        question_id: q.id,
+        question_type: 'rating',
+        time_on_question_ms: (existing?.time_on_question_ms || 0) + elapsed,
+        edit_count: existing?.edit_count || 0,
+        value_changes: existing?.value_changes || [],
+        final_value: val !== undefined && val !== null ? String(val) : '',
+        word_count: 0,
+        char_count: 0,
+        was_skipped: val === undefined || val === null
+      };
+
+      // Also record the rating comment as a sub-event
+      const comment = ratingComments[q.id] || '';
+      if (comment) {
+        const commentKey = `${q.id}_comment`;
+        const existingComment = questionEventsRef.current[commentKey];
+        questionEventsRef.current[commentKey] = {
+          question_id: commentKey,
+          question_type: 'rating_comment',
+          time_on_question_ms: existingComment?.time_on_question_ms || 0,
+          edit_count: existingComment?.edit_count || 0,
+          value_changes: existingComment?.value_changes || [],
+          final_value: comment,
+          word_count: wordCount(comment),
+          char_count: charCount(comment),
+          was_skipped: false
+        };
+      }
+    }
+
+    // Was leaving an open question (8-13)
+    if (prevStep >= 8 && prevStep <= 13) {
+      const q = OPEN_QUESTIONS[prevStep - 8];
+      const existing = questionEventsRef.current[q.id];
+      const ans = responses[q.id] || '';
+      questionEventsRef.current[q.id] = {
+        question_id: q.id,
+        question_type: 'open',
+        time_on_question_ms: (existing?.time_on_question_ms || 0) + elapsed,
+        edit_count: existing?.edit_count || 0,
+        value_changes: existing?.value_changes || [],
+        final_value: ans,
+        word_count: wordCount(ans),
+        char_count: charCount(ans),
+        was_skipped: !ans.trim()
+      };
+    }
+
+    stepStartTimeRef.current = Date.now();
+    previousStepRef.current = step;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, mode]);
 
   useEffect(() => {
     if (mode !== 'survey') return;
@@ -228,8 +388,23 @@ export default function PulseSurvey() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, step, responses]);
 
-  const updateResponse = (id: string, value: any) => setResponses(prev => ({ ...prev, [id]: value }));
-  const updateRatingComment = (id: string, value: string) => setRatingComments(prev => ({ ...prev, [id]: value }));
+  const updateResponse = (id: string, value: any) => {
+    const previous = responses[id];
+    if (previous !== undefined && previous !== value) {
+      // Track value change
+      const existing = questionEventsRef.current[id];
+      questionEventsRef.current[id] = {
+        ...(existing || { question_id: id, question_type: 'rating', time_on_question_ms: 0, edit_count: 0, value_changes: [], final_value: '', word_count: 0, char_count: 0, was_skipped: false }),
+        edit_count: (existing?.edit_count || 0) + 1,
+        value_changes: [...(existing?.value_changes || []), { from: previous, to: value, at: Date.now() }]
+      };
+    }
+    setResponses(prev => ({ ...prev, [id]: value }));
+  };
+
+  const updateRatingComment = (id: string, value: string) => {
+    setRatingComments(prev => ({ ...prev, [id]: value }));
+  };
 
   const startSurvey = () => setMode('name');
 
@@ -238,12 +413,62 @@ export default function PulseSurvey() {
     if (!startedAt) setStartedAt(new Date().toISOString());
     setMode('survey');
     setStep(0);
+    stepStartTimeRef.current = Date.now();
+    previousStepRef.current = 0;
   };
 
   const submitSurvey = async () => {
     setSubmitting(true);
     const completedAt = new Date().toISOString();
-    const durationSec = startedAt ? Math.round((new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 1000) : null;
+    const completedDate = new Date(completedAt);
+    const durationSec = startedAt ? Math.round((completedDate.getTime() - new Date(startedAt).getTime()) / 1000) : null;
+
+    // Capture last step's time before submitting
+    const elapsed = Date.now() - stepStartTimeRef.current;
+    if (previousStepRef.current >= 1 && previousStepRef.current <= 6) {
+      const q = RATING_QUESTIONS[previousStepRef.current - 1];
+      const existing = questionEventsRef.current[q.id];
+      if (existing) {
+        existing.time_on_question_ms += elapsed;
+      }
+    }
+    if (previousStepRef.current >= 8 && previousStepRef.current <= 13) {
+      const q = OPEN_QUESTIONS[previousStepRef.current - 8];
+      const existing = questionEventsRef.current[q.id];
+      if (existing) {
+        existing.time_on_question_ms += elapsed;
+      }
+    }
+
+    // Compute derived fields
+    const ratingVals = RATING_QUESTIONS.map(q => responses[q.id]).filter((v: any) => typeof v === 'number');
+    const ratingAvg = ratingVals.length ? mean(ratingVals) : null;
+    const ratingMin = ratingVals.length ? Math.min(...ratingVals) : null;
+    const ratingMax = ratingVals.length ? Math.max(...ratingVals) : null;
+    const ratingStdev = ratingVals.length > 1 ? stdev(ratingVals) : 0;
+
+    let npsClassification: string | null = null;
+    if (ratingAvg !== null) {
+      if (ratingAvg >= 9) npsClassification = 'promoter';
+      else if (ratingAvg >= 7) npsClassification = 'passive';
+      else npsClassification = 'detractor';
+    }
+
+    const allOpenText = OPEN_QUESTIONS.map(q => responses[q.id] || '').join(' ');
+    const allCommentText = RATING_QUESTIONS.map(q => ratingComments[q.id] || '').join(' ');
+    const totalText = `${allOpenText} ${allCommentText}`;
+
+    const skippedOpenCount = OPEN_QUESTIONS.filter(q => !(responses[q.id] || '').trim()).length;
+
+    // Aggregate behavioral signals
+    const allEvents = Object.values(questionEventsRef.current);
+    const totalEdits = allEvents.reduce((s, e) => s + (e.edit_count || 0), 0);
+    const ratingChanges = allEvents.filter(e => e.question_type === 'rating').reduce((s, e) => s + (e.edit_count || 0), 0);
+
+    // Hesitation score: avg time on rating questions normalized
+    const ratingTimes = allEvents.filter(e => e.question_type === 'rating').map(e => e.time_on_question_ms);
+    const hesitationScore = ratingTimes.length ? mean(ratingTimes) / 1000 : null;
+
     const row = {
       first_name: firstName.trim(),
       name_key: firstName.trim().toLowerCase(),
@@ -251,10 +476,58 @@ export default function PulseSurvey() {
       submitted_at: completedAt,
       duration_sec: durationSec,
       responses,
-      rating_comments: ratingComments
+      rating_comments: ratingComments,
+      // V2 metadata
+      survey_version: SURVEY_VERSION,
+      device_type: detectDeviceType(),
+      user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+      timezone: typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : null,
+      day_of_week: completedDate.getDay(),
+      hour_of_day: completedDate.getHours(),
+      // Behavioral aggregates
+      total_edits: totalEdits,
+      rating_changes: ratingChanges,
+      skipped_open_count: skippedOpenCount,
+      hesitation_score: hesitationScore,
+      // Pre-computed derived fields
+      rating_avg: ratingAvg,
+      rating_min: ratingMin,
+      rating_max: ratingMax,
+      rating_stdev: ratingStdev,
+      nps_classification: npsClassification,
+      total_word_count: wordCount(totalText),
+      total_char_count: charCount(totalText)
     };
+
     try {
-      await sb.insert(row);
+      const inserted = await sb.insert(row);
+      const newRow = Array.isArray(inserted) ? inserted[0] : inserted;
+      const responseId = newRow.id;
+
+      // Insert behavioral events linked to this response
+      if (allEvents.length > 0) {
+        const eventRows = allEvents.map(e => ({
+          response_id: responseId,
+          question_id: e.question_id,
+          question_type: e.question_type,
+          time_on_question_ms: e.time_on_question_ms,
+          edit_count: e.edit_count,
+          value_changes: e.value_changes,
+          final_value: e.final_value,
+          word_count: e.word_count,
+          char_count: e.char_count,
+          was_skipped: e.was_skipped
+        }));
+        try {
+          await sb.insertEvents(eventRows);
+        } catch (e) {
+          console.warn('Events insert failed, continuing anyway:', e);
+        }
+      }
+
+      // Trigger AI processing in the background — don't block UI
+      sb.triggerProcessing(responseId);
+
       try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
       setMode('complete');
     } catch (e: any) {
@@ -296,14 +569,40 @@ export default function PulseSurvey() {
     }
   };
 
+  const reprocessResponse = async (id: string) => {
+    try {
+      const res = await fetch(PROCESS_FN, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response_id: id })
+      });
+      if (!res.ok) throw new Error(`Status ${res.status}`);
+      setToast({ kind: 'success', message: 'AI re-processing triggered. Refresh in a few seconds.' });
+    } catch (e: any) {
+      setToast({ kind: 'error', message: `Re-process failed: ${e.message}` });
+    }
+  };
+
   const exportCSV = () => {
     if (!allResponses.length) return;
-    const headers = ['Name', 'Submitted At', 'Duration (sec)',
+    const headers = ['Name', 'Submitted At', 'Duration (sec)', 'Device', 'Rating Avg', 'NPS Class', 'Total Edits', 'AI Tone', 'AI Sentiment', 'AI Themes', 'AI Summary',
       ...RATING_QUESTIONS.map(q => `${q.dim}: Rating`),
       ...RATING_QUESTIONS.map(q => `${q.dim}: Why`),
       ...OPEN_QUESTIONS.map(q => q.text)];
     const rows = allResponses.map(r => {
-      const row: any[] = [r.firstName || '', new Date(r.submittedAt).toLocaleString(), r.durationSec ?? ''];
+      const row: any[] = [
+        r.firstName || '',
+        new Date(r.submittedAt).toLocaleString(),
+        r.durationSec ?? '',
+        r.deviceType ?? '',
+        r.ratingAvg !== null ? r.ratingAvg.toFixed(2) : '',
+        r.npsClassification ?? '',
+        r.totalEdits ?? '',
+        r.aiEmotionalTone ?? '',
+        r.aiSentimentOverall ?? '',
+        (r.aiThemes || []).join('; '),
+        (r.aiSummary || '').replace(/"/g, '""')
+      ];
       RATING_QUESTIONS.forEach(q => row.push(r.responses?.[q.id] ?? ''));
       RATING_QUESTIONS.forEach(q => row.push((r.ratingComments?.[q.id] || '').replace(/"/g, '""')));
       OPEN_QUESTIONS.forEach(q => row.push((r.responses?.[q.id] || '').replace(/"/g, '""')));
@@ -395,6 +694,8 @@ export default function PulseSurvey() {
         const latestMean = mean(RATING_QUESTIONS.map(q => latest.responses?.[q.id]).filter((v: any) => typeof v === 'number'));
         return { key, name: latest.firstName, delta: latestMean - firstMean, first: firstMean, latest: latestMean, n: subs.length };
       });
+
+    // Detractor flags from rating data
     const detractorFlags: any[] = [];
     Object.values(byPerson).forEach(subs => {
       const latest = subs[subs.length - 1];
@@ -412,7 +713,37 @@ export default function PulseSurvey() {
         }
       });
     });
-    return { dimStats, overallMean, overallNPS, constraint, strongest, highestVariance, byPerson, uniquePeople, trending, detractorFlags, totalSubmissions: allResponses.length };
+
+    // AI-powered insights
+    const aiAnomalies: any[] = [];
+    Object.values(byPerson).forEach(subs => {
+      const latest = subs[subs.length - 1];
+      (latest.aiAnomalyFlags || []).forEach((flag: any) => {
+        aiAnomalies.push({ ...flag, name: latest.firstName, responseId: latest.id });
+      });
+    });
+
+    // Theme frequency map
+    const themeMap: Record<string, { count: number; people: Set<string> }> = {};
+    allResponses.forEach(r => {
+      (r.aiThemes || []).forEach((t: string) => {
+        if (!themeMap[t]) themeMap[t] = { count: 0, people: new Set() };
+        themeMap[t].count++;
+        if (r.firstName) themeMap[t].people.add(r.firstName);
+      });
+    });
+    const topThemes = Object.entries(themeMap)
+      .map(([theme, data]) => ({ theme, count: data.count, peopleCount: data.people.size }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 12);
+
+    const processedCount = allResponses.filter(r => r.aiProcessedAt).length;
+
+    return {
+      dimStats, overallMean, overallNPS, constraint, strongest, highestVariance,
+      byPerson, uniquePeople, trending, detractorFlags, aiAnomalies, topThemes,
+      totalSubmissions: allResponses.length, processedCount
+    };
   }, [allResponses]);
 
   if (mode === 'welcome') {
@@ -444,7 +775,7 @@ export default function PulseSurvey() {
                 <ChevronRight className="w-5 h-5" />
               </button>
               {hasDraft && (
-                <button onClick={() => { setResponses({}); setRatingComments({}); setFirstName(''); setStartedAt(null); }} className="w-full mt-3 text-stone-500 hover:text-stone-700 text-sm py-2">
+                <button onClick={() => { setResponses({}); setRatingComments({}); setFirstName(''); setStartedAt(null); questionEventsRef.current = {}; }} className="w-full mt-3 text-stone-500 hover:text-stone-700 text-sm py-2">
                   Start over instead
                 </button>
               )}
@@ -517,7 +848,7 @@ export default function PulseSurvey() {
       <>
         {toast && <Toast {...toast} onClose={() => setToast(null)} />}
         <ConfirmDialog open={!!confirmDialog} title={confirmDialog?.title} message={confirmDialog?.message} onConfirm={confirmDialog?.onConfirm} onCancel={() => setConfirmDialog(null)} />
-        <AdminShell analytics={analytics} allResponses={allResponses} loading={loadingResponses} adminView={adminView} setAdminView={setAdminView} selectedResponse={selectedResponse} setSelectedResponse={setSelectedResponse} selectedPerson={selectedPerson} setSelectedPerson={setSelectedPerson} compareIds={compareIds} toggleCompare={toggleCompare} exportCSV={exportCSV} exportJSON={exportJSON} deleteResponse={requestDelete} setMode={setMode} refresh={loadResponses} />
+        <AdminShell analytics={analytics} allResponses={allResponses} loading={loadingResponses} adminView={adminView} setAdminView={setAdminView} selectedResponse={selectedResponse} setSelectedResponse={setSelectedResponse} selectedPerson={selectedPerson} setSelectedPerson={setSelectedPerson} compareIds={compareIds} toggleCompare={toggleCompare} exportCSV={exportCSV} exportJSON={exportJSON} deleteResponse={requestDelete} reprocessResponse={reprocessResponse} setMode={setMode} refresh={loadResponses} />
       </>
     );
   }
@@ -687,7 +1018,8 @@ export default function PulseSurvey() {
   );
 }
 
-function AdminShell({ analytics, allResponses, loading, adminView, setAdminView, selectedResponse, setSelectedResponse, selectedPerson, setSelectedPerson, compareIds, toggleCompare, exportCSV, exportJSON, deleteResponse, setMode, refresh }: any) {
+// ==================== ADMIN ====================
+function AdminShell({ analytics, allResponses, loading, adminView, setAdminView, selectedResponse, setSelectedResponse, selectedPerson, setSelectedPerson, compareIds, toggleCompare, exportCSV, exportJSON, deleteResponse, reprocessResponse, setMode, refresh }: any) {
   const TabBtn = ({ id, children, icon: Icon }: any) => (
     <button onClick={() => setAdminView(id)} className={`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-2 ${adminView === id ? 'bg-stone-800 text-white' : 'text-stone-600 hover:bg-stone-200'}`}>
       {Icon && <Icon className="w-4 h-4" />}{children}
@@ -699,7 +1031,7 @@ function AdminShell({ analytics, allResponses, loading, adminView, setAdminView,
         <div className="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
           <div>
             <h1 className="text-xl font-serif text-stone-800">Pulse Intelligence</h1>
-            <p className="text-stone-500 text-xs">{allResponses.length} submissions · {analytics?.uniquePeople || 0} {analytics?.uniquePeople === 1 ? 'person' : 'people'}</p>
+            <p className="text-stone-500 text-xs">{allResponses.length} submissions · {analytics?.uniquePeople || 0} {analytics?.uniquePeople === 1 ? 'person' : 'people'} · {analytics?.processedCount || 0} AI-processed</p>
           </div>
           <div className="flex gap-2 items-center">
             <button onClick={refresh} disabled={loading} className="bg-white border border-stone-300 hover:bg-stone-50 disabled:opacity-40 text-stone-700 px-3 py-2 rounded-lg flex items-center gap-1.5 text-sm font-medium">
@@ -728,10 +1060,10 @@ function AdminShell({ analytics, allResponses, loading, adminView, setAdminView,
             <p className="text-stone-500">Loading responses from database...</p>
           </div>
         ) : (<>
-          {adminView === 'dashboard' && <Dashboard analytics={analytics} allResponses={allResponses} onSelectPerson={(key: string) => { setSelectedPerson(key); setAdminView('person'); }} />}
+          {adminView === 'dashboard' && <Dashboard analytics={analytics} allResponses={allResponses} onSelectResponse={(r: any) => { setSelectedResponse(r); setAdminView('detail'); }} onSelectPerson={(key: string) => { setSelectedPerson(key); setAdminView('person'); }} />}
           {adminView === 'list' && <ResponseList responses={allResponses} onSelect={(r: any) => { setSelectedResponse(r); setAdminView('detail'); }} compareIds={compareIds} toggleCompare={toggleCompare} />}
           {adminView === 'people' && <PeopleView analytics={analytics} onSelectPerson={(key: string) => { setSelectedPerson(key); setAdminView('person'); }} />}
-          {adminView === 'detail' && selectedResponse && <ResponseDetail response={selectedResponse} onBack={() => setAdminView('list')} onDelete={deleteResponse} />}
+          {adminView === 'detail' && selectedResponse && <ResponseDetail response={selectedResponse} onBack={() => setAdminView('list')} onDelete={deleteResponse} onReprocess={reprocessResponse} />}
           {adminView === 'person' && selectedPerson && analytics && <PersonView personKey={selectedPerson} submissions={analytics.byPerson[selectedPerson]} onBack={() => setAdminView('people')} onSelectResponse={(r: any) => { setSelectedResponse(r); setAdminView('detail'); }} />}
           {adminView === 'compare' && compareIds.length === 2 && <CompareView responses={allResponses.filter((r: any) => compareIds.includes(r.id))} onBack={() => setAdminView('list')} />}
         </>)}
@@ -740,7 +1072,7 @@ function AdminShell({ analytics, allResponses, loading, adminView, setAdminView,
   );
 }
 
-function Dashboard({ analytics, allResponses, onSelectPerson }: any) {
+function Dashboard({ analytics, allResponses, onSelectResponse, onSelectPerson }: any) {
   if (!analytics || !allResponses.length) {
     return (
       <div className="bg-white rounded-2xl p-16 text-center">
@@ -749,7 +1081,7 @@ function Dashboard({ analytics, allResponses, onSelectPerson }: any) {
       </div>
     );
   }
-  const { dimStats, overallMean, overallNPS, constraint, strongest, highestVariance, trending, detractorFlags, uniquePeople, totalSubmissions } = analytics;
+  const { dimStats, overallMean, overallNPS, constraint, strongest, highestVariance, trending, detractorFlags, aiAnomalies, topThemes, uniquePeople, totalSubmissions } = analytics;
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -757,16 +1089,60 @@ function Dashboard({ analytics, allResponses, onSelectPerson }: any) {
         <MetricCard label="eNPS" value={overallNPS !== null ? (overallNPS > 0 ? `+${overallNPS}` : `${overallNPS}`) : '—'} tone={overallNPS >= 30 ? 'good' : overallNPS >= 0 ? 'neutral' : 'bad'} subtext={overallNPS >= 30 ? 'Strong' : overallNPS >= 0 ? 'Mixed' : 'At risk'} />
         <MetricCard label="Submissions" value={totalSubmissions} tone="neutral" subtext={trending.length > 0 ? `${trending.length} with trend data` : 'First wave'} />
       </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {constraint && <InsightCard icon={Target} color="rose" title="The Constraint" subtitle={constraint.dim} detail={constraint.text} metric={`${constraint.mean.toFixed(1)}/10`} footnote="Lowest-scoring dimension. Fix this first." />}
         {highestVariance && highestVariance.stdev > 1 && <InsightCard icon={AlertTriangle} color="amber" title="Most Divided" subtitle={highestVariance.dim} detail={highestVariance.text} metric={`σ ${highestVariance.stdev.toFixed(1)}`} footnote="Highest disagreement. Worth a conversation." />}
         {strongest && <InsightCard icon={Sparkles} color="emerald" title="The Strength" subtitle={strongest.dim} detail={strongest.text} metric={`${strongest.mean.toFixed(1)}/10`} footnote="Your highest score. Protect it." />}
       </div>
+
+      {topThemes.length > 0 && (
+        <div className="bg-white rounded-2xl p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <Tag className="w-5 h-5 text-stone-600" />
+            <h3 className="font-serif text-xl text-stone-800">Themes Emerging</h3>
+          </div>
+          <p className="text-sm text-stone-500 mb-5">What people are actually talking about across submissions. Compounds over time.</p>
+          <div className="flex flex-wrap gap-2">
+            {topThemes.map((t: any) => (
+              <div key={t.theme} className="px-3 py-1.5 bg-stone-100 rounded-full text-sm font-medium text-stone-700 flex items-center gap-1.5">
+                {t.theme}
+                <span className="text-xs text-stone-500">{t.count}{t.peopleCount > 1 ? ` · ${t.peopleCount} people` : ''}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl p-6">
         <h3 className="font-serif text-xl text-stone-800 mb-1">Dimension Breakdown</h3>
         <p className="text-sm text-stone-500 mb-5">Team average on each, with distribution.</p>
         <div className="space-y-4">{dimStats.map((d: any) => <DimensionRow key={d.id} dim={d} />)}</div>
       </div>
+
+      {aiAnomalies.length > 0 && (
+        <div className="bg-white rounded-2xl p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <Brain className="w-5 h-5 text-purple-600" />
+            <h3 className="font-serif text-xl text-stone-800">AI-Surfaced Anomalies</h3>
+          </div>
+          <p className="text-sm text-stone-500 mb-5">Patterns Claude flagged that don&apos;t match the surface answers. Worth a closer look.</p>
+          <div className="space-y-3">
+            {aiAnomalies.slice(0, 6).map((a: any, i: number) => (
+              <div key={i} className="border border-purple-200 bg-purple-50 rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                  <Zap className="w-4 h-4 text-purple-600 mt-1 flex-shrink-0" />
+                  <div>
+                    <p className="font-medium text-stone-800 text-sm mb-1">{a.name} <span className="text-stone-500">· {a.type.replace(/_/g, ' ')}</span></p>
+                    <p className="text-sm text-stone-700">{a.description}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {detractorFlags.length > 0 && (
         <div className="bg-white rounded-2xl p-6">
           <div className="flex items-center gap-2 mb-1">
@@ -790,6 +1166,7 @@ function Dashboard({ analytics, allResponses, onSelectPerson }: any) {
           </div>
         </div>
       )}
+
       {trending.length > 0 && (
         <div className="bg-white rounded-2xl p-6">
           <div className="flex items-center gap-2 mb-1">
@@ -902,10 +1279,9 @@ function ResponseList({ responses, onSelect, compareIds, toggleCompare }: any) {
     <div className="space-y-3">
       <p className="text-sm text-stone-500 mb-2">Tap checkbox to select up to 2 for side-by-side compare.</p>
       {responses.map((r: any) => {
-        const vals = RATING_QUESTIONS.map(q => r.responses?.[q.id]).filter((v: any) => typeof v === 'number');
-        const avg = vals.length ? mean(vals) : null;
+        const avg = r.ratingAvg;
         const isSelected = compareIds.includes(r.id);
-        const toneColor = avg !== null ? (avg >= 7 ? 'text-emerald-600' : avg >= 5 ? 'text-amber-600' : 'text-rose-600') : 'text-stone-400';
+        const toneColor = avg !== null && avg !== undefined ? (avg >= 7 ? 'text-emerald-600' : avg >= 5 ? 'text-amber-600' : 'text-rose-600') : 'text-stone-400';
         return (
           <div key={r.id} className={`bg-white border rounded-2xl p-4 flex items-center gap-4 transition-all ${isSelected ? 'border-amber-500 ring-2 ring-amber-200' : 'border-stone-200'}`}>
             <input type="checkbox" checked={isSelected} onChange={() => toggleCompare(r.id)} className="w-4 h-4 accent-amber-500 cursor-pointer" />
@@ -913,14 +1289,18 @@ function ResponseList({ responses, onSelect, compareIds, toggleCompare }: any) {
               <div className="flex items-center gap-3">
                 <div className="w-11 h-11 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center text-white font-medium">{(r.firstName || '?').charAt(0).toUpperCase()}</div>
                 <div>
-                  <p className="font-medium text-stone-800">{r.firstName || 'Anonymous'}</p>
-                  <p className="text-xs text-stone-500">{new Date(r.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · {new Date(r.submittedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}{r.durationSec && ` · ${Math.round(r.durationSec / 60)}m`}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium text-stone-800">{r.firstName || 'Anonymous'}</p>
+                    {r.aiEmotionalTone && <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">{r.aiEmotionalTone}</span>}
+                    {r.aiSentimentOverall && <span className={`text-xs px-2 py-0.5 rounded-full ${SENTIMENT_COLOR[r.aiSentimentOverall] || 'bg-stone-100 text-stone-700'}`}>{r.aiSentimentOverall}</span>}
+                  </div>
+                  <p className="text-xs text-stone-500">{new Date(r.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · {new Date(r.submittedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}{r.durationSec && ` · ${Math.round(r.durationSec / 60)}m`}{r.deviceType && ` · ${r.deviceType}`}</p>
                 </div>
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-right">
                   <p className="text-xs text-stone-500 uppercase tracking-wide">Avg</p>
-                  <p className={`text-xl font-serif ${toneColor}`}>{avg !== null ? avg.toFixed(1) : '—'}</p>
+                  <p className={`text-xl font-serif ${toneColor}`}>{avg !== null && avg !== undefined ? Number(avg).toFixed(1) : '—'}</p>
                 </div>
                 <ChevronRight className="w-5 h-5 text-stone-400" />
               </div>
@@ -936,26 +1316,28 @@ function PeopleView({ analytics, onSelectPerson }: any) {
   if (!analytics || analytics.uniquePeople === 0) return <div className="bg-white rounded-2xl p-16 text-center text-stone-500">No people yet.</div>;
   const people = Object.entries(analytics.byPerson).map(([key, subs]: any) => {
     const latest = subs[subs.length - 1];
-    const latestVals = RATING_QUESTIONS.map(q => latest.responses?.[q.id]).filter((v: any) => typeof v === 'number');
-    return { key, name: latest.firstName, count: subs.length, latest: latestVals.length ? mean(latestVals) : null, latestDate: latest.submittedAt };
+    return { key, name: latest.firstName, count: subs.length, latest: latest.ratingAvg, latestDate: latest.submittedAt, tone: latest.aiEmotionalTone };
   }).sort((a: any, b: any) => new Date(b.latestDate).getTime() - new Date(a.latestDate).getTime());
   return (
     <div className="space-y-3">
       {people.map((p: any) => {
-        const toneColor = p.latest !== null ? (p.latest >= 7 ? 'text-emerald-600' : p.latest >= 5 ? 'text-amber-600' : 'text-rose-600') : 'text-stone-400';
+        const toneColor = p.latest !== null && p.latest !== undefined ? (p.latest >= 7 ? 'text-emerald-600' : p.latest >= 5 ? 'text-amber-600' : 'text-rose-600') : 'text-stone-400';
         return (
           <button key={p.key} onClick={() => onSelectPerson(p.key)} className="w-full bg-white hover:bg-stone-50 border border-stone-200 rounded-2xl p-5 text-left flex items-center justify-between transition-all">
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center text-white font-medium text-lg">{p.name.charAt(0).toUpperCase()}</div>
               <div>
-                <p className="font-medium text-stone-800 text-lg">{p.name}</p>
+                <div className="flex items-center gap-2">
+                  <p className="font-medium text-stone-800 text-lg">{p.name}</p>
+                  {p.tone && <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">{p.tone}</span>}
+                </div>
                 <p className="text-sm text-stone-500">{p.count} submission{p.count !== 1 ? 's' : ''} · last: {new Date(p.latestDate).toLocaleDateString()}</p>
               </div>
             </div>
             <div className="flex items-center gap-4">
               <div className="text-right">
                 <p className="text-xs text-stone-500 uppercase tracking-wide">Latest</p>
-                <p className={`text-2xl font-serif ${toneColor}`}>{p.latest !== null ? p.latest.toFixed(1) : '—'}</p>
+                <p className={`text-2xl font-serif ${toneColor}`}>{p.latest !== null && p.latest !== undefined ? Number(p.latest).toFixed(1) : '—'}</p>
               </div>
               <ChevronRight className="w-5 h-5 text-stone-400" />
             </div>
@@ -992,19 +1374,18 @@ function PersonView({ personKey, submissions, onBack, onSelectResponse }: any) {
         <h3 className="text-sm font-semibold text-stone-500 uppercase tracking-wide mb-3">Submissions</h3>
         <div className="space-y-2">
           {submissions.slice().reverse().map((s: any) => {
-            const vals = RATING_QUESTIONS.map(q => s.responses?.[q.id]).filter((v: any) => typeof v === 'number');
-            const avg = vals.length ? mean(vals) : null;
+            const avg = s.ratingAvg;
             return (
               <button key={s.id} onClick={() => onSelectResponse(s)} className="w-full bg-white hover:bg-stone-50 border border-stone-200 rounded-xl p-4 text-left flex items-center justify-between transition-all">
                 <div className="flex items-center gap-3">
                   <Calendar className="w-4 h-4 text-stone-400" />
                   <div>
                     <p className="font-medium text-stone-800 text-sm">{new Date(s.submittedAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</p>
-                    <p className="text-xs text-stone-500">{new Date(s.submittedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</p>
+                    <p className="text-xs text-stone-500">{new Date(s.submittedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}{s.aiEmotionalTone && ` · ${s.aiEmotionalTone}`}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-lg font-serif text-stone-800">{avg !== null ? avg.toFixed(1) : '—'}</span>
+                  <span className="text-lg font-serif text-stone-800">{avg !== null && avg !== undefined ? Number(avg).toFixed(1) : '—'}</span>
                   <ChevronRight className="w-4 h-4 text-stone-400" />
                 </div>
               </button>
@@ -1046,7 +1427,7 @@ function Trajectory({ dim }: any) {
   );
 }
 
-function ResponseDetail({ response, onBack, onDelete }: any) {
+function ResponseDetail({ response, onBack, onDelete, onReprocess }: any) {
   return (
     <div>
       <button onClick={onBack} className="mb-6 text-stone-600 hover:text-stone-900 flex items-center gap-2"><ArrowLeft className="w-4 h-4" /> Back</button>
@@ -1054,10 +1435,82 @@ function ResponseDetail({ response, onBack, onDelete }: any) {
         <div className="flex justify-between items-start mb-6 pb-6 border-b border-stone-200">
           <div>
             <h2 className="text-3xl font-serif text-stone-800">{response.firstName || 'Anonymous'}</h2>
-            <p className="text-stone-500 text-sm mt-1">{new Date(response.submittedAt).toLocaleString()}{response.durationSec && ` · Completed in ${Math.round(response.durationSec / 60)}m ${response.durationSec % 60}s`}</p>
+            <p className="text-stone-500 text-sm mt-1">{new Date(response.submittedAt).toLocaleString()}{response.durationSec && ` · ${Math.round(response.durationSec / 60)}m ${response.durationSec % 60}s`}{response.deviceType && ` · ${response.deviceType}`}</p>
+            {response.totalEdits !== null && response.totalEdits !== undefined && response.totalEdits > 0 && (
+              <p className="text-stone-400 text-xs mt-1">{response.totalEdits} edit{response.totalEdits !== 1 ? 's' : ''}{response.ratingChanges > 0 && ` · ${response.ratingChanges} rating change${response.ratingChanges !== 1 ? 's' : ''}`}{response.skippedOpenCount > 0 && ` · ${response.skippedOpenCount} skipped`}</p>
+            )}
           </div>
-          <button onClick={() => onDelete(response.id)} className="text-red-500 hover:text-red-700 p-2" title="Delete"><Trash2 className="w-5 h-5" /></button>
+          <div className="flex gap-2">
+            <button onClick={() => onReprocess(response.id)} className="text-purple-600 hover:text-purple-800 p-2" title="Re-run AI processing">
+              <Brain className="w-5 h-5" />
+            </button>
+            <button onClick={() => onDelete(response.id)} className="text-red-500 hover:text-red-700 p-2" title="Delete"><Trash2 className="w-5 h-5" /></button>
+          </div>
         </div>
+
+        {response.aiProcessedAt && (
+          <div className="mb-8">
+            <div className="flex items-center gap-2 mb-4">
+              <Brain className="w-5 h-5 text-purple-600" />
+              <h3 className="text-sm font-semibold text-stone-500 uppercase tracking-wide">AI Intelligence</h3>
+            </div>
+            {response.aiProcessingError ? (
+              <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 text-sm text-rose-700">
+                AI processing failed: {response.aiProcessingError}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {response.aiSummary && (
+                  <div className="bg-purple-50 border border-purple-200 rounded-xl p-5">
+                    <div className="flex items-start gap-2 mb-2">
+                      <Quote className="w-4 h-4 text-purple-600 mt-1 flex-shrink-0" />
+                      <p className="text-stone-700 leading-relaxed">{response.aiSummary}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-purple-200">
+                      {response.aiEmotionalTone && <span className="text-xs px-2.5 py-1 bg-purple-100 text-purple-700 rounded-full font-medium">{response.aiEmotionalTone}</span>}
+                      {response.aiSentimentOverall && <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${SENTIMENT_COLOR[response.aiSentimentOverall] || 'bg-stone-100 text-stone-700'}`}>{response.aiSentimentOverall}</span>}
+                      {(response.aiThemes || []).map((t: string) => <span key={t} className="text-xs px-2.5 py-1 bg-stone-100 text-stone-700 rounded-full">{t}</span>)}
+                    </div>
+                  </div>
+                )}
+                {response.aiKeySignals && response.aiKeySignals.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">Key Signals</p>
+                    <div className="space-y-2">
+                      {response.aiKeySignals.map((s: string, i: number) => (
+                        <div key={i} className="flex items-start gap-2 text-sm text-stone-700">
+                          <span className="text-purple-600 font-bold flex-shrink-0">{i + 1}.</span>
+                          <span>{s}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {response.aiAnomalyFlags && response.aiAnomalyFlags.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">Anomaly Flags</p>
+                    <div className="space-y-2">
+                      {response.aiAnomalyFlags.map((f: any, i: number) => (
+                        <div key={i} className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+                          <p className="font-medium text-amber-800 text-xs uppercase tracking-wide mb-1">{f.type?.replace(/_/g, ' ')}</p>
+                          <p className="text-stone-700">{f.description}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {!response.aiProcessedAt && (
+          <div className="mb-8 bg-stone-50 border border-stone-200 rounded-xl p-4 text-sm text-stone-600 flex items-center gap-2">
+            <RefreshCw className="w-4 h-4" />
+            AI processing pending. Click the brain icon to run it now, or refresh in a few seconds.
+          </div>
+        )}
+
         <div className="mb-8">
           <h3 className="text-sm font-semibold text-stone-500 uppercase tracking-wide mb-4">Ratings</h3>
           <div className="space-y-4">
@@ -1065,6 +1518,7 @@ function ResponseDetail({ response, onBack, onDelete }: any) {
               const val = response.responses?.[q.id];
               const comment = response.ratingComments?.[q.id];
               const seg = scaleToSegment(val);
+              const sentiment = response.aiSentimentByQuestion?.[q.id];
               return (
                 <div key={q.id} className="border border-stone-200 rounded-xl p-4">
                   <div className="flex items-start justify-between gap-4 mb-2">
@@ -1089,15 +1543,22 @@ function ResponseDetail({ response, onBack, onDelete }: any) {
             })}
           </div>
         </div>
+
         <div>
           <h3 className="text-sm font-semibold text-stone-500 uppercase tracking-wide mb-4">Reflections</h3>
           <div className="space-y-5">
-            {OPEN_QUESTIONS.map(q => (
-              <div key={q.id}>
-                <p className="text-stone-700 font-medium mb-2">{q.text}</p>
-                <p className="text-stone-600 whitespace-pre-wrap bg-stone-50 rounded-lg p-4 border border-stone-200">{response.responses?.[q.id] || <em className="text-stone-400">No answer</em>}</p>
-              </div>
-            ))}
+            {OPEN_QUESTIONS.map(q => {
+              const sentiment = response.aiSentimentByQuestion?.[q.id];
+              return (
+                <div key={q.id}>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-stone-700 font-medium">{q.text}</p>
+                    {sentiment && <span className={`text-xs px-2 py-0.5 rounded-full ${SENTIMENT_COLOR[sentiment] || 'bg-stone-100 text-stone-700'}`}>{sentiment}</span>}
+                  </div>
+                  <p className="text-stone-600 whitespace-pre-wrap bg-stone-50 rounded-lg p-4 border border-stone-200">{response.responses?.[q.id] || <em className="text-stone-400">No answer</em>}</p>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -1151,14 +1612,14 @@ function CompareView({ responses, onBack }: any) {
 }
 
 function PersonCol({ response }: any) {
-  const vals = RATING_QUESTIONS.map(q => response.responses?.[q.id]).filter((v: any) => typeof v === 'number');
-  const avg = vals.length ? mean(vals) : null;
+  const avg = response.ratingAvg;
   return (
     <div>
       <p className="text-xs text-stone-500 uppercase tracking-wide">Respondent</p>
       <p className="font-serif text-xl text-stone-800">{response.firstName}</p>
       <p className="text-xs text-stone-500">{new Date(response.submittedAt).toLocaleDateString()}</p>
-      <p className="text-2xl font-serif text-amber-600 mt-2">{avg !== null ? avg.toFixed(1) : '—'}<span className="text-sm text-stone-400">/10</span></p>
+      {response.aiEmotionalTone && <p className="text-xs text-purple-600 mt-1">{response.aiEmotionalTone}</p>}
+      <p className="text-2xl font-serif text-amber-600 mt-2">{avg !== null && avg !== undefined ? Number(avg).toFixed(1) : '—'}<span className="text-sm text-stone-400">/10</span></p>
     </div>
   );
 }
